@@ -1,7 +1,9 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import registerRoutes from "./routes";
+import registerRoutes from "./routes/index.js";
+import errorMiddleware from "./middleware/error.middleware.js";
+import notFoundMiddleware from "./middleware/notFound.middleware.js";
 
 
 const app = express();
@@ -38,17 +40,15 @@ app.get("/api/v1/health", (req, res) => {
 
 
 // App Routes
-
 registerRoutes(app);
 
-// 404 Handler
 
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        message: `Route not found: ${req.method} ${req.originalUrl}`,
-    });
-});
+// 404 - Route not found
+app.use(notFoundMiddleware);
+
+
+// Centralized error handler
+app.use(errorMiddleware);
 
 
 export default app;

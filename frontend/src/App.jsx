@@ -1,12 +1,8 @@
-import React from "react"
-
+import React from 'react'
 
 function App() {
-
   return (
-    <>
-    <div className='h-1 text-center text-red-600'>hello world</div>
-    </>
+    <div className='text-center text-red-800 h-2.5'>Heelo world</div>
   )
 }
 
