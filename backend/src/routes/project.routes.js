@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import {
     createProject,
-    getTeamProjects,
+    getProjects,
     getProjectById,
     updateProject,
     deleteProject
@@ -14,13 +14,13 @@ const router = Router();
 
 router.use(verifyJWT);
 
-router.post("/", createProject);
+router.route("/")
+    .post(createProject)
+    .get(getProjects);
 
-router.get("/team/:teamId", getTeamProjects);
-router.get("/:projectId", getProjectById);
-
-router.patch("/:projectId", updateProject);
-
-router.delete("/:projectId", deleteProject);
+router.route("/:projectId")
+    .get(getProjectById)
+    .patch(updateProject)
+    .delete(deleteProject);
 
 export default router;

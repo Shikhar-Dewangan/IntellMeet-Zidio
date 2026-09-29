@@ -2,12 +2,11 @@ import { Router } from "express";
 
 import {
     createActionItem,
-    getMeetingActionItems,
-    getMyActionItems,
+    getActionItems,
+    getActionItemById,
     updateActionItem,
     deleteActionItem,
-    assignActionItem,
-    updateActionItemStatus
+    convertActionItemToTask,
 } from "../controllers/actionItem.controller.js";
 
 import { verifyJWT } from "../middleware/auth.middleware.js";
@@ -16,16 +15,15 @@ const router = Router();
 
 router.use(verifyJWT);
 
-router.post("/", createActionItem);
+router.route("/")
+    .post(createActionItem)
+    .get(getActionItems);
 
-router.get("/my", getMyActionItems);
-router.get("/meeting/:meetingId", getMeetingActionItems);
+router.post("/:actionItemId/convert-to-task", convertActionItemToTask);
 
-router.patch("/:actionItemId", updateActionItem);
-
-router.delete("/:actionItemId", deleteActionItem);
-
-router.patch("/:actionItemId/assign", assignActionItem);
-router.patch("/:actionItemId/status", updateActionItemStatus);
+router.route("/:actionItemId")
+    .get(getActionItemById)
+    .patch(updateActionItem)
+    .delete(deleteActionItem);
 
 export default router;

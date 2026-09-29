@@ -7,6 +7,8 @@ import taskRoutes from "./task.routes.js";
 import meetingNoteRoutes from "./meetingNote.routes.js";
 import actionItemRoutes from "./actionItem.routes.js";
 import notificationRoutes from "./notification.routes.js";
+import recordingRoutes from "./recording.routes.js";
+import analyticsRoutes from "./analytics.routes.js";
 
 const registerRoutes = (app) => {
     app.use("/api/v1/auth", authRoutes);
@@ -18,6 +20,8 @@ const registerRoutes = (app) => {
     app.use("/api/v1/meeting-notes", meetingNoteRoutes);
     app.use("/api/v1/action-items", actionItemRoutes);
     app.use("/api/v1/notifications", notificationRoutes);
+    app.use("/api/v1/recordings", recordingRoutes);
+    app.use("/api/v1/analytics", analyticsRoutes);
 };
 
 export default registerRoutes;

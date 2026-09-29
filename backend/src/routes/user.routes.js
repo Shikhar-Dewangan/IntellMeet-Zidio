@@ -10,7 +10,7 @@ import {
 } from "../controllers/user.controller.js";
 
 import { verifyJWT } from "../middleware/auth.middleware.js";
-import {upload} from "../middleware/multer.middleware.js"
+import { uploadSingle } from "../middleware/multer.middleware.js";
 
 const router = Router();
 
@@ -20,7 +20,7 @@ router.get("/me", getCurrentUser);
 router.get("/:userId", getUserById);
 
 router.patch("/profile", updateProfile);
-router.patch("/avatar",upload.single("avatar"), updateAvatar);
+router.patch("/avatar", uploadSingle("avatar"), updateAvatar);
 router.patch("/phone", updatePhone);
 router.patch("/location", updateLocation);
 

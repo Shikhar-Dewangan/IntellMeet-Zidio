@@ -65,6 +65,10 @@ const meetingSchema = new mongoose.Schema(
             type: String,
             default: "",
         },
+        keyPoints: {
+            type: [String],
+            default: [],
+        },
     },
     {
         timestamps: true,

@@ -1,7 +1,9 @@
+import mongoose from "mongoose";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/ApiResponse.js";
+import ApiError from "../utils/ApiError.js";
 import User from "../models/user.model.js";
-import {uploadFileToCloudinary} from "../utils/FileUplode.js"
+import { buildCloudinaryFolder, uploadFileToCloudinary } from "../utils/FileUplode.js";
 
 
 // Get Current User
@@ -52,6 +54,10 @@ const getUserById = asyncHandler(async (req, res) => {
         );
     }
 
+    if (req.user.role !== "admin" && user._id.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "You are not authorized to view this user profile");
+    }
+
     return res
         .status(200)
         .json(
@@ -69,7 +75,7 @@ const updateProfile = asyncHandler(async (req, res) => {
 
      const { fullName } = req.body;
 
-    if (fullName === undefined) {
+    if (typeof fullName !== "string") {
         throw new ApiError(
             400,
             "Full name is required"
@@ -126,8 +132,14 @@ const updateAvatar = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Avatar is required");
     }
 
+    const avatarFolder = buildCloudinaryFolder({
+        entityType: "avatars",
+        userId: req.user._id.toString(),
+    });
+
     const uploadedAvatar = await uploadFileToCloudinary(
-        avatarLocalPath
+        avatarLocalPath,
+        avatarFolder
     );
 
     if (!uploadedAvatar?.secure_url) {
@@ -169,7 +181,7 @@ const updatePhone = asyncHandler(async (req, res) => {
     const { phone } = req.body;
 
 
-    if (phone === undefined) {
+    if (typeof phone !== "string") {
         throw new ApiError(
             400,
             "Phone number is required"
@@ -230,7 +242,7 @@ const updateLocation = asyncHandler(async (req, res) => {
      const { location } = req.body;
 
 
-    if (location === undefined) {
+    if (typeof location !== "string") {
         throw new ApiError(
             400,
             "Location is required"

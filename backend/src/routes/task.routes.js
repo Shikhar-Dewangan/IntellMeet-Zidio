@@ -6,8 +6,6 @@ import {
     getTaskById,
     updateTask,
     deleteTask,
-    assignTask,
-    updateTaskStatus
 } from "../controllers/task.controller.js";
 
 import { verifyJWT } from "../middleware/auth.middleware.js";
@@ -16,16 +14,13 @@ const router = Router();
 
 router.use(verifyJWT);
 
-router.post("/", createTask);
+router.route("/")
+    .post(createTask)
+    .get(getTasks);
 
-router.get("/", getTasks);
-router.get("/:taskId", getTaskById);
-
-router.patch("/:taskId", updateTask);
-
-router.delete("/:taskId", deleteTask);
-
-router.patch("/:taskId/assign", assignTask);
-router.patch("/:taskId/status", updateTaskStatus);
+router.route("/:taskId")
+    .get(getTaskById)
+    .patch(updateTask)
+    .delete(deleteTask);
 
 export default router;

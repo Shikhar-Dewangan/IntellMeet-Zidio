@@ -1,11 +1,12 @@
 import { Router } from "express";
 
 import {
+    getNotificationById,
     getMyNotifications,
     getUnreadNotifications,
     markNotificationAsRead,
     markAllNotificationsAsRead,
-    deleteNotification
+    deleteNotification,
 } from "../controllers/notification.controller.js";
 
 import { verifyJWT } from "../middleware/auth.middleware.js";
@@ -16,6 +17,7 @@ router.use(verifyJWT);
 
 router.get("/", getMyNotifications);
 router.get("/unread", getUnreadNotifications);
+router.get("/:notificationId", getNotificationById);
 
 router.patch("/:notificationId/read", markNotificationAsRead);
 router.patch("/read-all", markAllNotificationsAsRead);
