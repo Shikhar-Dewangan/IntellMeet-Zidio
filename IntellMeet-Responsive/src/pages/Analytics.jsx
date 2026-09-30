@@ -1,0 +1,4 @@
+import { BarChart3, Clock3, MessageSquare, Users } from "lucide-react";
+import StatCard from "../components/common/StatCard";
+import MeetingChart from "../components/Charts/MeetingChart";
+export default function Analytics(){return <div><div className="page-heading"><div><span className="eyebrow">INSIGHTS</span><h1>Analytics</h1><p>Understand meeting activity and collaboration patterns.</p></div><button className="btn btn-secondary">Export report</button></div><div className="stats-grid"><StatCard icon={<BarChart3/>} label="Total meetings" value="142" change="+18% this month"/><StatCard icon={<Clock3/>} label="Avg. duration" value="42m" change="-6% this month"/><StatCard icon={<Users/>} label="Active participants" value="86" change="+11% this month"/><StatCard icon={<MessageSquare/>} label="Action items closed" value="73%" change="+9% this month"/></div><MeetingChart/></div>}
