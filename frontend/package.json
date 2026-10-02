@@ -1,5 +1,5 @@
 {
-  "name": "intel-meet",
+  "name": "frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -10,9 +10,19 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.13.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.104.0",
+    "axios": "^1.20.0",
+    "lucide-react": "^1.48.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-hook-form": "^7.89.0",
+    "react-hot-toast": "^2.6.1",
+    "react-redux": "^9.3.0",
+    "react-router-dom": "^7.18.4",
+    "socket.io-client": "^4.8.4",
+    "sonner": "^2.0.8",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {

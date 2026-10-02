@@ -1,9 +1,7 @@
-import React from 'react'
+import AppRoutes from "./routes/AppRoutes.jsx";
 
 function App() {
-  return (
-    <div className='text-center text-red-800 h-2.5'>Heelo world</div>
-  )
+  return <AppRoutes />;
 }
 
-export default App
+export default App;
