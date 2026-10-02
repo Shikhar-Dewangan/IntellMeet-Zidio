@@ -1,2 +1,0 @@
-export const formatDate = (date) => new Intl.DateTimeFormat("en-IN", {dateStyle:"medium"}).format(new Date(date));
-export const initials = (name="User") => name.split(" ").map(x=>x[0]).slice(0,2).join("").toUpperCase();
