@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import { Menu, X, Video } from "lucide-react";
+import ThemeToggle from "./ThemeToggle.jsx";
 
 const navLinks = [
   { name: "Home", href: "#home" },
@@ -18,8 +19,9 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 lg:h-20">
-          {/* Logo */}
+        <div className="flex items-center justify-between h-16 xl:h-20">
+
+          {/* ===== LEFT: Logo ===== */}
           <Link to="/" className="flex items-center gap-2.5 shrink-0">
             <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/25">
               <Video className="w-5 h-5 text-white" />
@@ -29,48 +31,54 @@ export default function Navbar() {
             </span>
           </Link>
 
-          {/* Desktop nav */}
-          <nav className="hidden lg:flex items-center gap-7">
+          {/* ===== CENTER: Nav links (properly spaced) ===== */}
+          <nav className="hidden xl:flex items-center gap-5 2xl:gap-7 mx-auto">
             {navLinks.map((link) => (
               <a
                 key={link.name}
                 href={link.href}
-                className="text-sm font-medium text-slate-600 hover:text-blue-600 transition"
+                className="text-sm font-medium text-slate-600 hover:text-blue-600 transition whitespace-nowrap"
               >
                 {link.name}
               </a>
             ))}
           </nav>
 
-          {/* Desktop actions */}
-          <div className="hidden lg:flex items-center gap-3">
+          {/* ===== RIGHT: Toggle + Auth ===== */}
+          <div className="hidden xl:flex items-center gap-2 shrink-0">
+            <ThemeToggle />
             <Link
               to="/login"
-              className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition"
+              className="px-4 py-2.5 rounded-lg border border-slate-200 text-slate-700 text-sm font-semibold hover:bg-slate-50 transition whitespace-nowrap"
             >
               Sign in
             </Link>
             <Link
               to="/register"
-              className="px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition shadow-lg shadow-blue-600/25"
+              className="px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition shadow-lg shadow-blue-600/25 whitespace-nowrap"
             >
               Get started
             </Link>
           </div>
 
-          {/* Mobile toggle */}
-          <button
-            onClick={() => setOpen(!open)}
-            className="lg:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-700"
-            aria-label="Toggle menu"
-          >
-            {open ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-          </button>
+          {/* ===== Mobile: toggle + hamburger ===== */}
+          <div className="xl:hidden flex items-center gap-2">
+            <ThemeToggle compact />
+            <button
+              type="button"
+              onClick={() => setOpen(!open)}
+              className="rounded-lg p-2 text-slate-700 transition hover:bg-slate-100"
+              aria-label={open ? "Close menu" : "Open menu"}
+              aria-expanded={open}
+            >
+              {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            </button>
+          </div>
         </div>
 
-        {/* Mobile menu */}
+        {/* ===== Mobile menu ===== */}
         {open && (
-          <div className="lg:hidden pb-4 pt-2 space-y-1 border-t border-slate-200">
+          <div className="xl:hidden pb-4 pt-2 space-y-1 border-t border-slate-200">
             {navLinks.map((link) => (
               <a
                 key={link.name}

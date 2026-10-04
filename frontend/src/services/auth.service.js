@@ -2,12 +2,12 @@ import api from "./api.js";
 
 export const registerUser = async (userData) => {
   const response = await api.post("/auth/register", userData);
-  return response.data;
+  return response.data?.data ?? response.data;
 };
 
 export const loginUser = async (credentials) => {
   const response = await api.post("/auth/login", credentials);
-  return response.data;
+  return response.data?.data ?? response.data;
 };
 
 export const logoutUser = async () => {

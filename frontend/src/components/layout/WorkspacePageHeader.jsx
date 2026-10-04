@@ -30,7 +30,7 @@ const routeTitles = {
   "/settings": "Settings",
 };
 
-export default function Header() {
+export default function WorkspacePageHeader() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const location = useLocation();
@@ -58,7 +58,7 @@ export default function Header() {
   const handleLogout = async () => {
     try {
       await logoutUser();
-    } catch (e) {
+    } catch {
       // ignore
     } finally {
       dispatch(clearCredentials());

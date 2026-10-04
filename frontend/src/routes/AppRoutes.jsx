@@ -62,9 +62,9 @@ function AppRoutes() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--app-background)] text-[var(--app-muted)]">
-        <div className="flex items-center gap-3 rounded-full border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-2 shadow-sm">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--app-accent)]" />
+      <div className="flex min-h-screen items-center justify-center bg-(--app-background) text-(--app-muted)">
+        <div className="flex items-center gap-3 rounded-full border border-(--app-border) bg-(--app-surface) px-4 py-2 shadow-sm">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-(--app-accent)" />
           Loading workspace...
         </div>
       </div>

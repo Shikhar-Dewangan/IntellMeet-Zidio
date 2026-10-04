@@ -8,6 +8,11 @@ import { buildCloudinaryFolder, uploadFileToCloudinary } from "../utils/FileUplo
 
 // Get Current User
 const getCurrentUser = asyncHandler(async (req, res) => {
+    if (!req.user) {
+        return res
+            .status(200)
+            .json(new ApiResponse(200, null, "No active session"));
+    }
 
        const user = await User.findById(req.user._id).select(
         "-password -refreshToken"

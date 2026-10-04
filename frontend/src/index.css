@@ -1,45 +1,140 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
+/* Class-based dark mode: <html class="dark"> */
 @custom-variant dark (&:where(.dark, .dark *));
-
-@theme {
-  --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
-}
-
-:root {
-  --app-background: #f5f7fb;
-  --app-surface: #ffffff;
-  --app-surface-muted: #f8fafc;
-  --app-text: #0f172a;
-  --app-muted: #64748b;
-  --app-border: #e2e8f0;
-  --app-accent: #2563eb;
-  color-scheme: light;
-}
-
-.dark {
-  --app-background: #0a1628;
-  --app-surface: #0f1e35;
-  --app-surface-muted: #121e30;
-  --app-text: #f1f5f9;
-  --app-muted: #94a3b8;
-  --app-border: #1e293b;
-  --app-accent: #3b82f6;
-  color-scheme: dark;
-}
 
 html {
   scroll-behavior: smooth;
-  background-color: var(--app-background);
-  color: var(--app-text);
 }
 
-body,
-#root {
-  min-height: 100%;
-  background: var(--app-background);
-  color: var(--app-text);
-  font-family: var(--font-sans);
+/* Semantic tokens -> generates bg-page, bg-card, border-line, text-fg, etc. */
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-page: var(--page);
+  --color-card: var(--card);
+  --color-card-hover: var(--card-hover);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+
+  /* Indigo used for buttons + active nav (sampled from the reference image) */
+  --color-brand: #5b4be0;
+  /* Palette accents */
+  --color-accent-blue: #3b82f6;
+  --color-accent-purple: #7c5cff;
+  --color-accent-violet: #a855f7;
+  --color-accent-emerald: #10b981;
+  --color-accent-amber: #f59e0b;
+  --color-accent-rose: #f43f5e;
 }
+
+/* LIGHT theme (text colors from your spec; surfaces are standard slate equivalents) */
+:root {
+  --page: #f8fafc;
+  --card: #ffffff;
+  --card-hover: #f1f5f9;
+  --surface: #f1f5f9;
+  --line: #cbd5e1;   /* ← CHANGED: #e2e8f0 → #cbd5e1 (thoda darker border) */
+  --fg: #0f172a;
+  --fg-2: #64748b;
+  --fg-3: #94a3b8;
+}
+
+/* DARK theme (exact palette from your spec) */
+.dark {
+  --page: #0a0a0f;
+  --card: #121218;
+  --card-hover: #1a1a22;
+  --surface: #1a1a22;
+  --line: #1f1f28;
+  --fg: #f5f5f7;
+  --fg-2: #b8b8c2;
+  --fg-3: #8b8b95;
+}
+
+@layer base {
+  body {
+    @apply bg-page text-fg font-sans antialiased;
+  }
+}
+
+/* Auto dark mapping: common light-mode utilities you may add later
+   are remapped to the dark palette automatically. */
+.dark .bg-white { background-color: var(--card); }
+.dark .bg-slate-50,
+.dark .bg-slate-100 { background-color: var(--surface); }
+.dark .border-slate-200,
+.dark .border-slate-100 { border-color: var(--line); }
+.dark .text-slate-900,
+.dark .text-slate-800 { color: var(--fg); }
+.dark .text-slate-600,
+.dark .text-slate-500 { color: var(--fg-2); }
+.dark .text-slate-400 { color: var(--fg-3); }
+
+.dark .landing-page [class~="bg-white/90"] {
+  background-color: color-mix(in srgb, var(--card) 90%, transparent);
+}
+.dark .landing-page .text-slate-700 { color: var(--fg-2); }
+.dark .landing-page .text-blue-700 { color: #93c5fd; }
+.dark .landing-page .bg-blue-50,
+.dark .landing-page .bg-blue-100 {
+  background-color: color-mix(in srgb, #3b82f6 16%, var(--card));
+}
+.dark .landing-page .bg-emerald-100 {
+  background-color: color-mix(in srgb, #10b981 16%, var(--card));
+}
+.dark .landing-page .bg-amber-100 {
+  background-color: color-mix(in srgb, #f59e0b 16%, var(--card));
+}
+.dark .landing-page .bg-rose-100 {
+  background-color: color-mix(in srgb, #f43f5e 16%, var(--card));
+}
+.dark .landing-page [class~="bg-blue-100/50"] {
+  background-color: rgb(59 130 246 / 16%);
+}
+.dark .landing-page [class~="bg-violet-100/40"] {
+  background-color: rgb(168 85 247 / 14%);
+}
+.dark .landing-page [class~="hover:bg-blue-50"]:hover {
+  background-color: color-mix(in srgb, #3b82f6 24%, var(--card));
+}
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-slate-50:hover { background-color: var(--card-hover); }
+
+.dark .auth-page {
+  background: radial-gradient(
+    ellipse at top left,
+    rgb(59 130 246 / 12%),
+    transparent 55%
+  ), var(--page);
+}
+.dark .auth-card {
+  border-color: var(--line);
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 55%);
+}
+.dark .auth-brand-panel {
+  background: linear-gradient(145deg, #151b2b, #11131d 58%, #191526);
+}
+.dark .auth-page .text-slate-700 { color: var(--fg-2); }
+.dark .auth-page .bg-slate-200 { background-color: var(--line); }
+.dark .auth-page .bg-blue-100 {
+  background-color: color-mix(in srgb, #3b82f6 18%, var(--card));
+}
+.dark .auth-page input:not([type="checkbox"]) {
+  color-scheme: dark;
+  background-color: var(--surface);
+  border-color: var(--line);
+  color: var(--fg);
+}
+.dark .auth-page input:not([type="checkbox"]):focus {
+  background-color: var(--card);
+}
+.dark .auth-page input[type="checkbox"] {
+  color-scheme: dark;
+  border-color: var(--line);
+}
+.dark .auth-page .text-red-500 { color: #f87171; }

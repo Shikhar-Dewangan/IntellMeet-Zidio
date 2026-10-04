@@ -3,21 +3,32 @@ import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
 import Meeting from "../models/meeting.model.js";
 import { getSocketServer } from "../sockets/socket.js";
-import { startMeetingLifecycle, endMeetingLifecycle } from "../services/meeting.service.js";
-import crypto from "crypto"
+import {
+    startMeetingLifecycle,
+    endMeetingLifecycle,
+    scheduleHostInactivityEnd,
+    clearHostInactivityEnd,
+} from "../services/meeting.service.js";
+import crypto from "crypto";
 import { isValidObjectId } from "mongoose";
-
 
 // Generate a unique meeting code
 const generateMeetingCode = () => {
     return crypto.randomBytes(6).toString("hex");
 };
 
+const populateMeeting = (query) =>
+    query
+        .populate("host", "fullName email avatar")
+        .populate("participants", "fullName email avatar");
 
 // Create Meeting
 const createMeeting = asyncHandler(async (req, res) => {
-
-    const { title, description, scheduledAt } = req.body;
+    const {
+        title,
+        description,
+        scheduledAt,
+    } = req.body;
 
     // Required field validation
     if (!title?.trim()) {
@@ -25,14 +36,20 @@ const createMeeting = asyncHandler(async (req, res) => {
     }
 
     if (!scheduledAt) {
-        throw new ApiError(400, "Scheduled date and time is required");
+        throw new ApiError(
+            400,
+            "Scheduled date and time is required"
+        );
     }
 
     // Validate scheduled date
     const scheduledDate = new Date(scheduledAt);
 
     if (Number.isNaN(scheduledDate.getTime())) {
-        throw new ApiError(400, "Invalid scheduled date and time");
+        throw new ApiError(
+            400,
+            "Invalid scheduled date and time"
+        );
     }
 
     // Do not allow meetings to be scheduled in the past
@@ -63,14 +80,15 @@ const createMeeting = asyncHandler(async (req, res) => {
 
         // Host is initially a participant as well
         participants: [req.user._id],
+
         meetingCode,
         status: "scheduled",
         scheduledAt: scheduledDate,
     });
 
-    const createdMeeting = await Meeting.findById(meeting._id)
-        .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar");
+    const createdMeeting = await populateMeeting(
+        Meeting.findById(meeting._id)
+    );
 
     return res.status(201).json(
         new ApiResponse(
@@ -79,34 +97,49 @@ const createMeeting = asyncHandler(async (req, res) => {
             "Meeting created successfully"
         )
     );
-
 });
 
 // Get Meeting By ID
 const getMeetingById = asyncHandler(async (req, res) => {
-
     const { meetingId } = req.params;
 
     if (!isValidObjectId(meetingId)) {
-        throw new ApiError(400, "Invalid meeting ID");
+        throw new ApiError(
+            400,
+            "Invalid meeting ID"
+        );
     }
 
-    const meeting = await Meeting.findById(meetingId)
-        .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar");
+    const meeting = await populateMeeting(
+        Meeting.findById(meetingId)
+    );
 
     if (!meeting) {
-        throw new ApiError(404, "Meeting not found");
+        throw new ApiError(
+            404,
+            "Meeting not found"
+        );
     }
 
     const userId = req.user._id.toString();
-    const isHost = meeting.host?._id?.toString() === userId || meeting.host?.toString() === userId;
-    const isParticipant = meeting.participants.some((participant) =>
-        (participant?._id?.toString() || participant?.toString()) === userId
+
+    const isHost =
+        meeting.host?._id?.toString() === userId ||
+        meeting.host?.toString() === userId;
+
+    const isParticipant = meeting.participants.some(
+        (participant) =>
+            (participant?._id?.toString() ||
+                participant?.toString()) === userId
     );
 
-    if (!isHost && !isParticipant && req.user.role !== "admin") {
-        throw new ApiError(403, "You are not authorized to access this meeting");
+    const isAdmin = req.user.role === "admin";
+
+    if (!isHost && !isParticipant && !isAdmin) {
+        throw new ApiError(
+            403,
+            "You are not authorized to access this meeting"
+        );
     }
 
     return res.status(200).json(
@@ -116,23 +149,27 @@ const getMeetingById = asyncHandler(async (req, res) => {
             "Meeting fetched successfully"
         )
     );
-
 });
 
 // Get My Meetings
 const getMyMeetings = asyncHandler(async (req, res) => {
-
     const userId = req.user._id;
 
-    const meetings = await Meeting.find({
-        $or: [
-            { host: userId },
-            { participants: userId },
-        ],
-    })
-        .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar")
-        .sort({ scheduledAt: 1 });
+    const meetings = await populateMeeting(
+        Meeting.find({
+            $or: [
+                { host: userId },
+                { participants: userId },
+
+                // Pending / accepted / rejected invitation records
+                {
+                    "invitedUsers.user": userId,
+                },
+            ],
+        }).sort({
+            scheduledAt: 1,
+        })
+    );
 
     return res.status(200).json(
         new ApiResponse(
@@ -141,13 +178,12 @@ const getMyMeetings = asyncHandler(async (req, res) => {
             "Meetings fetched successfully"
         )
     );
-
 });
 
 // Update Meeting
 const updateMeeting = asyncHandler(async (req, res) => {
-
     const { meetingId } = req.params;
+
     const {
         title,
         description,
@@ -156,18 +192,25 @@ const updateMeeting = asyncHandler(async (req, res) => {
     } = req.body;
 
     if (!isValidObjectId(meetingId)) {
-        throw new ApiError(400, "Invalid meeting ID");
+        throw new ApiError(
+            400,
+            "Invalid meeting ID"
+        );
     }
 
     const meeting = await Meeting.findById(meetingId);
 
     if (!meeting) {
-        throw new ApiError(404, "Meeting not found");
+        throw new ApiError(
+            404,
+            "Meeting not found"
+        );
     }
 
-    // Only host can update the meeting
+    // Only host can update
     if (
-        meeting.host.toString() !== req.user._id.toString()
+        meeting.host.toString() !==
+        req.user._id.toString()
     ) {
         throw new ApiError(
             403,
@@ -175,7 +218,7 @@ const updateMeeting = asyncHandler(async (req, res) => {
         );
     }
 
-    // Do not allow updates after meeting has ended
+    // Completed meetings cannot be edited
     if (meeting.status === "completed") {
         throw new ApiError(
             400,
@@ -183,7 +226,7 @@ const updateMeeting = asyncHandler(async (req, res) => {
         );
     }
 
-    // Do not allow updates to cancelled meetings
+    // Cancelled meetings cannot be edited
     if (meeting.status === "cancelled") {
         throw new ApiError(
             400,
@@ -219,7 +262,7 @@ const updateMeeting = asyncHandler(async (req, res) => {
             );
         }
 
-        // A scheduled meeting cannot be moved into the past
+        // Scheduled meeting cannot move into past
         if (
             meeting.status === "scheduled" &&
             scheduledDate <= new Date()
@@ -230,7 +273,7 @@ const updateMeeting = asyncHandler(async (req, res) => {
             );
         }
 
-        // Once meeting has started, scheduledAt shouldn't change
+        // Cannot change scheduledAt after meeting starts
         if (meeting.status === "live") {
             throw new ApiError(
                 400,
@@ -241,8 +284,7 @@ const updateMeeting = asyncHandler(async (req, res) => {
         meeting.scheduledAt = scheduledDate;
     }
 
-    // Status should NOT normally be changed directly here.
-    // Lifecycle should be controlled by startMeeting/endMeeting.
+    // Status must be controlled by lifecycle endpoints
     if (status !== undefined) {
         throw new ApiError(
             400,
@@ -252,9 +294,9 @@ const updateMeeting = asyncHandler(async (req, res) => {
 
     await meeting.save();
 
-    const updatedMeeting = await Meeting.findById(meeting._id)
-        .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar");
+    const updatedMeeting = await populateMeeting(
+        Meeting.findById(meeting._id)
+    );
 
     return res.status(200).json(
         new ApiResponse(
@@ -263,36 +305,42 @@ const updateMeeting = asyncHandler(async (req, res) => {
             "Meeting updated successfully"
         )
     );
-
 });
 
 // Delete Meeting
 const deleteMeeting = asyncHandler(async (req, res) => {
-
     const { meetingId } = req.params;
 
     if (!isValidObjectId(meetingId)) {
-        throw new ApiError(400, "Invalid meeting ID");
+        throw new ApiError(
+            400,
+            "Invalid meeting ID"
+        );
     }
 
     const meeting = await Meeting.findById(meetingId);
 
     if (!meeting) {
-        throw new ApiError(404, "Meeting not found");
-    }
-
-    // Only host can delete
-    if (
-        meeting.host.toString() !==
-        req.user._id.toString()
-    ) {
         throw new ApiError(
-            403,
-            "Only the meeting host can delete this meeting"
+            404,
+            "Meeting not found"
         );
     }
 
-    // Do not delete an active meeting
+    const isHost =
+        meeting.host.toString() ===
+        req.user._id.toString();
+
+    const isAdmin = req.user.role === "admin";
+
+    if (!isHost && !isAdmin) {
+        throw new ApiError(
+            403,
+            "Only the meeting host or system admin can delete this meeting"
+        );
+    }
+
+    // Live meetings cannot be deleted
     if (meeting.status === "live") {
         throw new ApiError(
             400,
@@ -300,15 +348,10 @@ const deleteMeeting = asyncHandler(async (req, res) => {
         );
     }
 
-    // Already completed
-    if (meeting.status === "completed") {
-        throw new ApiError(
-            400,
-            "Completed meeting cannot be deleted"
-        );
-    }
-
+    // scheduled, completed and cancelled can be deleted
     await Meeting.findByIdAndDelete(meetingId);
+
+    clearHostInactivityEnd(meetingId);
 
     return res.status(200).json(
         new ApiResponse(
@@ -317,23 +360,27 @@ const deleteMeeting = asyncHandler(async (req, res) => {
             "Meeting deleted successfully"
         )
     );
-
 });
 
 // Join Meeting
 const joinMeeting = asyncHandler(async (req, res) => {
-
     const { meetingId } = req.params;
     const userId = req.user._id;
 
     if (!isValidObjectId(meetingId)) {
-        throw new ApiError(400, "Invalid meeting ID");
+        throw new ApiError(
+            400,
+            "Invalid meeting ID"
+        );
     }
 
     const meeting = await Meeting.findById(meetingId);
 
     if (!meeting) {
-        throw new ApiError(404, "Meeting not found");
+        throw new ApiError(
+            404,
+            "Meeting not found"
+        );
     }
 
     // Cannot join cancelled meeting
@@ -352,7 +399,7 @@ const joinMeeting = asyncHandler(async (req, res) => {
         );
     }
 
-    // Do not allow joining before scheduled time
+    // Cannot join before scheduled time
     if (
         meeting.status === "scheduled" &&
         new Date() < meeting.scheduledAt
@@ -363,11 +410,12 @@ const joinMeeting = asyncHandler(async (req, res) => {
         );
     }
 
-    // Check if user already joined
-    const alreadyParticipant = meeting.participants.some(
-        (participantId) =>
-            participantId.toString() === userId.toString()
-    );
+    const alreadyParticipant =
+        meeting.participants.some(
+            (participantId) =>
+                participantId.toString() ===
+                userId.toString()
+        );
 
     if (alreadyParticipant) {
         throw new ApiError(
@@ -380,9 +428,13 @@ const joinMeeting = asyncHandler(async (req, res) => {
 
     await meeting.save();
 
-    const updatedMeeting = await Meeting.findById(meeting._id)
-        .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar");
+    // Someone joined again.
+    // Cancel host inactivity shutdown timer.
+    clearHostInactivityEnd(meeting._id);
+
+    const updatedMeeting = await populateMeeting(
+        Meeting.findById(meeting._id)
+    );
 
     return res.status(200).json(
         new ApiResponse(
@@ -391,37 +443,39 @@ const joinMeeting = asyncHandler(async (req, res) => {
             "Joined meeting successfully"
         )
     );
-
 });
 
 // Leave Meeting
 const leaveMeeting = asyncHandler(async (req, res) => {
-
     const { meetingId } = req.params;
     const userId = req.user._id;
 
     if (!isValidObjectId(meetingId)) {
-        throw new ApiError(400, "Invalid meeting ID");
+        throw new ApiError(
+            400,
+            "Invalid meeting ID"
+        );
     }
 
     const meeting = await Meeting.findById(meetingId);
 
     if (!meeting) {
-        throw new ApiError(404, "Meeting not found");
-    }
-
-    // Host cannot leave their own meeting
-    if (meeting.host.toString() === userId.toString()) {
         throw new ApiError(
-            400,
-            "Meeting host cannot leave the meeting"
+            404,
+            "Meeting not found"
         );
     }
 
-    const isParticipant = meeting.participants.some(
-        (participantId) =>
-            participantId.toString() === userId.toString()
-    );
+    const isHost =
+        meeting.host.toString() ===
+        userId.toString();
+
+    const isParticipant =
+        meeting.participants.some(
+            (participantId) =>
+                participantId.toString() ===
+                userId.toString()
+        );
 
     if (!isParticipant) {
         throw new ApiError(
@@ -430,23 +484,69 @@ const leaveMeeting = asyncHandler(async (req, res) => {
         );
     }
 
-    meeting.participants = meeting.participants.filter(
-        (participantId) =>
-            participantId.toString() !== userId.toString()
-    );
+    // Host is allowed to leave.
+    meeting.participants =
+        meeting.participants.filter(
+            (participantId) =>
+                participantId.toString() !==
+                userId.toString()
+        );
 
     await meeting.save();
 
     const io = getSocketServer();
-    if (io) {
-        const roomName = `meeting:${meeting._id.toString()}`;
-        io.to(roomName).emit("participant:left", {
-            userId: userId.toString(),
-            meetingId: meeting._id.toString(),
-        });
 
-        const userSockets = await io.in(`user:${userId.toString()}`).fetchSockets();
-        await Promise.all(userSockets.map((socket) => socket.leave(roomName)));
+    if (io) {
+        const roomName =
+            `meeting:${meeting._id.toString()}`;
+
+        io.to(roomName).emit(
+            "participant:left",
+            {
+                userId: userId.toString(),
+                meetingId: meeting._id.toString(),
+            }
+        );
+
+        const userSockets =
+            await io
+                .in(`user:${userId.toString()}`)
+                .fetchSockets();
+
+        await Promise.all(
+            userSockets.map((socket) =>
+                socket.leave(roomName)
+            )
+        );
+    }
+
+    /*
+     * If host has left and nobody else is active,
+     * start the 10-minute server-side inactivity timer.
+     */
+    if (
+        isHost &&
+        meeting.participants.length === 0
+    ) {
+        scheduleHostInactivityEnd(
+            meeting._id,
+            async (endedMeeting) => {
+                getSocketServer()
+                    ?.to(
+                        `meeting:${endedMeeting._id.toString()}`
+                    )
+                    .emit(
+                        "meeting:ended",
+                        {
+                            meetingId:
+                                endedMeeting._id.toString(),
+
+                            endedBy:
+                                "host-inactivity",
+                        }
+                    );
+            }
+        );
     }
 
     return res.status(200).json(
@@ -456,22 +556,37 @@ const leaveMeeting = asyncHandler(async (req, res) => {
             "Left meeting successfully"
         )
     );
-
 });
 
 // Start Meeting
 const startMeeting = asyncHandler(async (req, res) => {
     const { meetingId } = req.params;
-    const meeting = await startMeetingLifecycle(meetingId, req.user._id);
 
-    getSocketServer()?.to(`meeting:${meeting._id.toString()}`).emit("meeting:started", {
-        meetingId: meeting._id.toString(),
-        startedAt: meeting.startedAt,
-    });
+    const meeting =
+        await startMeetingLifecycle(
+            meetingId,
+            req.user._id
+        );
 
-    const startedMeeting = await Meeting.findById(meeting._id)
-        .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar");
+    getSocketServer()
+        ?.to(
+            `meeting:${meeting._id.toString()}`
+        )
+        .emit(
+            "meeting:started",
+            {
+                meetingId:
+                    meeting._id.toString(),
+
+                startedAt:
+                    meeting.startedAt,
+            }
+        );
+
+    const startedMeeting =
+        await populateMeeting(
+            Meeting.findById(meeting._id)
+        );
 
     return res.status(200).json(
         new ApiResponse(
@@ -482,20 +597,62 @@ const startMeeting = asyncHandler(async (req, res) => {
     );
 });
 
-
 // End Meeting
 const endMeeting = asyncHandler(async (req, res) => {
     const { meetingId } = req.params;
-    const meeting = await endMeetingLifecycle(meetingId, req.user._id);
 
-    getSocketServer()?.to(`meeting:${meeting._id.toString()}`).emit("meeting:ended", {
-        meetingId: meeting._id.toString(),
-        endedBy: req.user._id.toString(),
+    const meeting =
+        await endMeetingLifecycle(
+            meetingId,
+            req.user._id
+        );
+
+    const io = getSocketServer();
+
+    io?.to(
+        `meeting:${meeting._id.toString()}`
+    ).emit("meeting:ended", {
+        meetingId:
+            meeting._id.toString(),
+
+        endedBy:
+            req.user._id.toString(),
     });
 
-    const endedMeeting = await Meeting.findById(meeting._id)
-        .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar");
+    /*
+     * AI is intentionally NOT dependent
+     * on recording or live captions.
+     *
+     * Transcript is generated continuously
+     * during the meeting.
+     *
+     * AI starts after meeting completion.
+     *
+     * Do not await this here because the user
+     * should not wait for OpenAI before receiving
+     * the meeting-ended response.
+     */
+    void processMeetingAI(
+        meeting._id
+    ).catch((error) => {
+        console.error(
+            "Background meeting AI processing failed:",
+            error.message
+        );
+    });
+
+    const endedMeeting =
+        await Meeting.findById(
+            meeting._id
+        )
+            .populate(
+                "host",
+                "fullName email avatar"
+            )
+            .populate(
+                "participants",
+                "fullName email avatar"
+            );
 
     return res.status(200).json(
         new ApiResponse(
@@ -515,5 +672,6 @@ export {
     joinMeeting,
     leaveMeeting,
     startMeeting,
-    endMeeting
+    endMeeting,
 };
+

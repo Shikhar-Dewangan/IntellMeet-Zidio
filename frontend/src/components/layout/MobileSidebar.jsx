@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import {
   LayoutDashboard,
@@ -14,6 +14,7 @@ import {
   Settings,
   X,
   Crown,
+  ArrowRight,
 } from "lucide-react";
 import { setMobileSidebarOpen } from "../../store/slices/uiSlice.js";
 
@@ -30,7 +31,7 @@ const navItems = [
   { name: "Settings", to: "/settings", icon: Settings },
 ];
 
-export default function MobileSidebar() {
+export default function MobileSidebar({ unreadNotificationCount = 0 }) {
   const dispatch = useDispatch();
   const isOpen = useSelector((s) => s.ui.isMobileSidebarOpen);
   const close = () => dispatch(setMobileSidebarOpen(false));
@@ -47,27 +48,25 @@ export default function MobileSidebar() {
       {isOpen && (
         <div
           onClick={close}
-          className="lg:hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
+          className="lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
         />
       )}
 
       <aside
-        className={`lg:hidden fixed top-0 left-0 h-full w-72 bg-white border-r border-slate-200 z-50 transform transition-transform duration-300 flex flex-col ${
+        className={`lg:hidden fixed top-0 left-0 h-full w-72 max-w-[85vw] bg-page border-r border-line z-50 transform transition-transform duration-300 flex flex-col ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex items-center justify-between px-4 h-16 border-b border-slate-200 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/25">
+        <div className="flex items-center justify-between px-4 h-16 border-b border-line shrink-0">
+          <Link to="/dashboard" onClick={close} className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-linear-to-br from-accent-purple to-accent-blue flex items-center justify-center shadow-lg shadow-accent-purple/30">
               <Video className="w-5 h-5 text-white" />
             </div>
-            <span className="text-lg font-bold text-slate-900">
-              IntelliMeet
-            </span>
-          </div>
+            <span className="text-lg font-bold text-fg">IntelliMeet</span>
+          </Link>
           <button
             onClick={close}
-            className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
+            className="p-2 rounded-lg hover:bg-surface text-fg-3 hover:text-fg transition"
             aria-label="Close menu"
           >
             <X className="w-5 h-5" />
@@ -87,17 +86,20 @@ export default function MobileSidebar() {
                       `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
                         isActive
                           ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
-                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                          : "text-fg-2 hover:bg-surface hover:text-fg"
                       }`
                     }
                   >
                     <Icon className="w-5 h-5 shrink-0" />
                     <span className="truncate flex-1">{item.name}</span>
-                    {item.badge && (
-                      <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">
-                        {item.badge}
-                      </span>
-                    )}
+                    {item.to === "/notifications" &&
+                      unreadNotificationCount > 0 && (
+                        <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">
+                          {unreadNotificationCount > 99
+                            ? "99+"
+                            : unreadNotificationCount}
+                        </span>
+                      )}
                   </NavLink>
                 </li>
               );
@@ -105,20 +107,23 @@ export default function MobileSidebar() {
           </ul>
         </nav>
 
-        <div className="p-3 border-t border-slate-200">
-          <div className="p-4 rounded-2xl bg-linear-to-br from-blue-50 to-violet-50 border border-blue-100">
-            <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center mb-3">
-              <Crown className="w-5 h-5 text-amber-600" />
+        {/* Upgrade card */}
+        <div className="p-3 border-t border-line shrink-0">
+          <div className="p-4 rounded-2xl border border-line bg-linear-to-br from-blue-600/15 to-accent-violet/10">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center mb-3">
+              <Crown className="w-5 h-5" />
             </div>
-            <p className="text-sm font-semibold text-slate-900">
-              Upgrade to Pro
-            </p>
-            <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+            <p className="text-sm font-semibold text-fg">Upgrade to Pro</p>
+            <p className="mt-1 text-xs text-fg-2 leading-relaxed">
               Get more AI credits and advanced features.
             </p>
-            <button className="mt-3 w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold transition">
-              Upgrade Now →
-            </button>
+            <Link
+              to="/billing"
+              onClick={close}
+              className="mt-3 flex items-center justify-center gap-1.5 w-full py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-lg shadow-blue-600/25 transition"
+            >
+              Upgrade Now <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
         </div>
       </aside>

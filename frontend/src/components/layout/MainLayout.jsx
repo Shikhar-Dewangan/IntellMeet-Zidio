@@ -38,7 +38,7 @@ export default function MainLayout() {
   }, [location.pathname, refreshUnreadNotifications]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex">
+    <div className="min-h-screen bg-page text-fg flex">
       {/* Mobile sidebar drawer */}
       <MobileSidebar unreadNotificationCount={unreadNotificationCount} />
 
@@ -49,7 +49,7 @@ export default function MainLayout() {
       <div className="flex-1 flex flex-col min-w-0">
         <Header unreadNotificationCount={unreadNotificationCount} />
 
-        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
+        <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
           <Outlet />
         </main>
 

@@ -7,11 +7,11 @@ import {
   Mail,
   Lock,
   User,
+  Phone,
   Eye,
   EyeOff,
   Video,
   ArrowRight,
-  AtSign,
 } from "lucide-react";
 
 import { registerUser, googleAuth } from "../../services/auth.service";
@@ -32,7 +32,13 @@ export default function Register() {
     watch,
     formState: { errors },
   } = useForm({
-    defaultValues: { fullName: "", email: "", password: "", confirm: "" },
+    defaultValues: {
+      fullName: "",
+      email: "",
+      phone: "",
+      password: "",
+      confirm: "",
+    },
   });
 
   const password = watch("password");
@@ -45,6 +51,7 @@ export default function Register() {
       const payload = {
         fullName: data.fullName,
         email: data.email,
+        phone: data.phone,
         password: data.password,
       };
       const res = await registerUser(payload);
@@ -81,10 +88,10 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-slate-50 via-blue-50/40 to-white flex items-start justify-center px-3 py-4 sm:p-6 lg:items-center lg:p-8">
-      <div className="w-full max-w-6xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl shadow-blue-900/5 border border-slate-200 overflow-hidden grid lg:grid-cols-2">
+    <div className="auth-page min-h-screen bg-linear-to-br from-slate-50 via-blue-50/40 to-white flex items-start justify-center px-3 py-4 sm:p-6 lg:items-center lg:p-8">
+      <div className="auth-card w-full max-w-6xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl shadow-blue-900/5 border border-slate-200 overflow-hidden grid lg:grid-cols-2">
         {/* ============ LEFT — Branding ============ */}
-        <div className="hidden lg:flex flex-col p-10 xl:p-14 bg-linear-to-br from-white via-blue-50/30 to-violet-50/30">
+        <div className="auth-brand-panel hidden lg:flex flex-col p-10 xl:p-14 bg-linear-to-br from-white via-blue-50/30 to-violet-50/30">
           <Link to="/" className="flex items-center gap-2.5 mb-12">
             <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/25">
               <Video className="w-6 h-6 text-white" />
@@ -195,11 +202,11 @@ export default function Register() {
           </Link>
 
           {/* Header */}
-          <div className="mb-7">
+          <div className="mb-7 text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
               Join the Community
             </h1>
-            <p className="mt-1.5 text-sm text-slate-500 flex items-center gap-2">
+            <p className="mt-1.5 text-sm text-slate-500 flex items-center justify-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
               Start your meeting journey today
             </p>
@@ -210,6 +217,7 @@ export default function Register() {
             onSuccess={handleGoogleSuccess}
             onError={handleGoogleError}
             disabled={loading}
+            className="mx-auto w-full max-w-[400px]"
           />
 
           {/* Divider */}
@@ -270,6 +278,38 @@ export default function Register() {
               {errors.email && (
                 <p className="mt-1.5 text-xs text-red-500">
                   {errors.email.message}
+                </p>
+              )}
+            </div>
+
+            {/* Phone */}
+            <div>
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                Phone Number
+              </label>
+              <div className="relative">
+                <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="tel"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  placeholder="+1 555 123 4567"
+                  {...register("phone", {
+                    required: "Phone number is required",
+                    validate: (value) => {
+                      const normalizedPhone = value.trim().replace(/[\s-]/g, "");
+                      return (
+                        /^\+?[1-9]\d{7,14}$/.test(normalizedPhone) ||
+                        "Enter a valid phone number with 8 to 15 digits"
+                      );
+                    },
+                  })}
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:bg-white focus:outline-none transition"
+                />
+              </div>
+              {errors.phone && (
+                <p className="mt-1.5 text-xs text-red-500">
+                  {errors.phone.message}
                 </p>
               )}
             </div>

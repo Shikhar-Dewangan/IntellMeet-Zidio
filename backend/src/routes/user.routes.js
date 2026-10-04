@@ -9,14 +9,15 @@ import {
     updateLocation
 } from "../controllers/user.controller.js";
 
-import { verifyJWT } from "../middleware/auth.middleware.js";
+import { optionalJWT, verifyJWT } from "../middleware/auth.middleware.js";
 import { uploadSingle } from "../middleware/multer.middleware.js";
 
 const router = Router();
 
+router.get("/me", optionalJWT, getCurrentUser);
+
 router.use(verifyJWT);
 
-router.get("/me", getCurrentUser);
 router.get("/:userId", getUserById);
 
 router.patch("/profile", updateProfile);
