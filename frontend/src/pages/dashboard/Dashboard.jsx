@@ -284,7 +284,7 @@ export default function Dashboard() {
             <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-blue-500 dark:text-blue-400">
               Welcome back
             </p>
-            <h1 className="mt-2 text-2xl font-bold text-fg sm:text-3xl lg:text-4xl">Hi, {firstName} 👋</h1>
+            <h1 className="mt-2 text-2xl font-bold text-fg sm:text-3xl lg:text-4xl">Hello, {firstName} </h1>
             <p className="mt-3 max-w-md text-sm text-fg-2">
               Here's what's happening with your meetings, tasks and projects today. Let's make progress!
             </p>

@@ -106,19 +106,38 @@ export function AvatarGroup({ participants = [], extra = 0, size = "md" }) {
     lg: "w-9 h-9 text-xs",
   };
   const cls = sizes[size];
+
   return (
     <div className="flex items-center -space-x-2">
-      {participants.slice(0, 4).map((p, i) => (
-        <div
-          key={i}
-          className={`${cls} ${colors[i % colors.length]} rounded-full border-2 border-white  flex items-center justify-center text-white font-bold`}
-        >
-          {typeof p === "string" ? p[0] : p.name?.[0] || "U"}
-        </div>
-      ))}
+      {participants.slice(0, 4).map((p, i) => {
+        const name =
+          typeof p === "string"
+            ? p
+            : p?.fullName || p?.name || p?.email || "U";
+        const initial = name[0]?.toUpperCase() || "U";
+        const avatar = typeof p === "object" ? p?.avatar : null;
+
+        return (
+          <div
+            key={i}
+            className={`${cls} ${!avatar ? colors[i % colors.length] : "bg-slate-200 dark:bg-slate-700"} rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center text-white font-bold overflow-hidden`}
+            title={name}
+          >
+            {avatar ? (
+              <img
+                src={avatar}
+                alt={name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              initial
+            )}
+          </div>
+        );
+      })}
       {extra > 0 && (
         <div
-          className={`${cls} rounded-full bg-slate-200  border-2 border-white  flex items-center justify-center text-slate-600  font-bold`}
+          className={`${cls} rounded-full bg-slate-200 dark:bg-slate-700 border-2 border-white dark:border-slate-900 flex items-center justify-center text-slate-600 dark:text-slate-300 font-bold`}
         >
           +{extra}
         </div>

@@ -100,6 +100,11 @@ const meetingSchema = new mongoose.Schema(
             index: true,
         },
 
+        lastActivityAt: {
+            type: Date,
+            default: Date.now,
+        },
+
         startedAt: {
             type: Date,
             default: null,

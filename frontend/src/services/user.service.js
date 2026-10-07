@@ -15,6 +15,11 @@ export const updateProfile = async (profileData) => {
   return response.data;
 };
 
+export const updateAppearance = async (appearance) => {
+  const response = await api.patch("/users/appearance", appearance);
+  return response.data;
+};
+
 export const updateAvatar = async (avatarFile) => {
   const formData = new FormData();
   formData.append("avatar", avatarFile);
@@ -30,5 +35,15 @@ export const updatePhone = async (phone) => {
 
 export const updateLocation = async (location) => {
   const response = await api.patch("/users/location", { location });
+  return response.data;
+};
+
+export const searchUsers = async (query) => {
+  const response = await api.get("/users/search", {
+    params: {
+      q: query,
+    },
+  });
+
   return response.data;
 };

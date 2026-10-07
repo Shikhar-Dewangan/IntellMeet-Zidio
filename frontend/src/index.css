@@ -8,10 +8,25 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Semantic tokens -> generates bg-page, bg-card, border-line, text-fg, etc. */
+html[data-font-size="small"] {
+  font-size: 14px;
+}
+
+html[data-font-size="medium"] {
+  font-size: 16px;
+}
+
+html[data-font-size="large"] {
+  font-size: 18px;
+}
+
+/* ============================================================
+   THEME TOKENS + ACCENT TOKENS
+   ============================================================ */
 @theme inline {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 
+  /* Semantic tokens */
   --color-page: var(--page);
   --color-card: var(--card);
   --color-card-hover: var(--card-hover);
@@ -21,10 +36,31 @@ html {
   --color-fg-2: var(--fg-2);
   --color-fg-3: var(--fg-3);
 
-  /* Indigo used for buttons + active nav (sampled from the reference image) */
-  --color-brand: #5b4be0;
-  /* Palette accents */
-  --color-accent-blue: #3b82f6;
+  /* ✅ Dynamic accent — follows data-accent */
+  --color-accent-blue: var(--accent-600);       /* ← CHANGED */
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-900: var(--accent-900);
+
+  /* Existing blue utilities are used as the app's primary accent. */
+  --color-blue-50: var(--accent-50);
+  --color-blue-100: var(--accent-100);
+  --color-blue-200: var(--accent-200);
+  --color-blue-300: var(--accent-200);
+  --color-blue-400: var(--accent-400);
+  --color-blue-500: var(--accent-500);
+  --color-blue-600: var(--accent-600);
+  --color-blue-700: var(--accent-700);
+  --color-blue-800: var(--accent-900);
+  --color-blue-900: var(--accent-900);
+  --color-blue-950: var(--accent-900);
+
+  /* Fixed status colors — DO NOT change */
   --color-accent-purple: #7c5cff;
   --color-accent-violet: #a855f7;
   --color-accent-emerald: #10b981;
@@ -32,19 +68,33 @@ html {
   --color-accent-rose: #f43f5e;
 }
 
-/* LIGHT theme (text colors from your spec; surfaces are standard slate equivalents) */
+/* ============================================================
+   LIGHT THEME
+   ============================================================ */
 :root {
   --page: #f8fafc;
   --card: #ffffff;
   --card-hover: #f1f5f9;
   --surface: #f1f5f9;
-  --line: #cbd5e1;   /* ← CHANGED: #e2e8f0 → #cbd5e1 (thoda darker border) */
+  --line: #cbd5e1;
   --fg: #0f172a;
   --fg-2: #64748b;
   --fg-3: #94a3b8;
+
+  /* Default accent = indigo */
+  --accent-50: #eef2ff;
+  --accent-100: #e0e7ff;
+  --accent-200: #c7d2fe;
+  --accent-400: #818cf8;
+  --accent-500: #6366f1;
+  --accent-600: #4f46e5;
+  --accent-700: #4338ca;
+  --accent-900: #312e81;
 }
 
-/* DARK theme (exact palette from your spec) */
+/* ============================================================
+   DARK THEME
+   ============================================================ */
 .dark {
   --page: #0a0a0f;
   --card: #121218;
@@ -56,14 +106,96 @@ html {
   --fg-3: #8b8b95;
 }
 
+/* ============================================================
+   ACCENT PRESETS
+   ============================================================ */
+[data-accent="indigo"] {
+  --accent-50: #eef2ff;
+  --accent-100: #e0e7ff;
+  --accent-200: #c7d2fe;
+  --accent-400: #818cf8;
+  --accent-500: #6366f1;
+  --accent-600: #4f46e5;
+  --accent-700: #4338ca;
+  --accent-900: #312e81;
+}
+
+[data-accent="violet"] {
+  --accent-50: #f5f3ff;
+  --accent-100: #ede9fe;
+  --accent-200: #ddd6fe;
+  --accent-400: #a78bfa;
+  --accent-500: #8b5cf6;
+  --accent-600: #7c3aed;
+  --accent-700: #6d28d9;
+  --accent-900: #4c1d95;
+}
+
+[data-accent="pink"] {
+  --accent-50: #fdf2f8;
+  --accent-100: #fce7f3;
+  --accent-200: #fbcfe8;
+  --accent-400: #f472b6;
+  --accent-500: #ec4899;
+  --accent-600: #db2777;
+  --accent-700: #be185d;
+  --accent-900: #831843;
+}
+
+[data-accent="red"] {
+  --accent-50: #fef2f2;
+  --accent-100: #fee2e2;
+  --accent-200: #fecaca;
+  --accent-400: #f87171;
+  --accent-500: #ef4444;
+  --accent-600: #dc2626;
+  --accent-700: #b91c1c;
+  --accent-900: #7f1d1d;
+}
+
+[data-accent="orange"] {
+  --accent-50: #fff7ed;
+  --accent-100: #ffedd5;
+  --accent-200: #fed7aa;
+  --accent-400: #fb923c;
+  --accent-500: #f97316;
+  --accent-600: #ea580c;
+  --accent-700: #c2410c;
+  --accent-900: #7c2d12;
+}
+
+[data-accent="green"] {
+  --accent-50: #ecfdf5;
+  --accent-100: #d1fae5;
+  --accent-200: #a7f3d0;
+  --accent-400: #34d399;
+  --accent-500: #10b981;
+  --accent-600: #059669;
+  --accent-700: #047857;
+  --accent-900: #064e3b;
+}
+
+[data-accent="blue"] {
+  --accent-50: #eff6ff;
+  --accent-100: #dbeafe;
+  --accent-200: #bfdbfe;
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-600: #2563eb;
+  --accent-700: #1d4ed8;
+  --accent-900: #1e3a8a;
+}
+
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
 @layer base {
   body {
     @apply bg-page text-fg font-sans antialiased;
   }
 }
 
-/* Auto dark mapping: common light-mode utilities you may add later
-   are remapped to the dark palette automatically. */
+/* Auto dark mapping (existing overrides) */
 .dark .bg-white { background-color: var(--card); }
 .dark .bg-slate-50,
 .dark .bg-slate-100 { background-color: var(--surface); }

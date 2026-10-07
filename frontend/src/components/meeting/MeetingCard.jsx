@@ -11,10 +11,6 @@ import {
   Eye,
 } from "lucide-react";
 
-/* ============================================================
-   STATUS BADGE (inline)
-   ============================================================ */
-
 const STATUS_CONFIG = {
   live: {
     label: "Live",
@@ -38,14 +34,10 @@ const STATUS_CONFIG = {
     label: "Cancelled",
     className: "bg-surface text-fg-3 border-line",
   },
-  paused: {
-    label: "Paused",
-    className: "bg-accent-amber/15 text-accent-amber border-accent-amber/20",
-  },
 };
 
 function StatusPill({ status }) {
-  const config = STATUS_CONFIG[status] || STATUS_CONFIG.upcoming;
+  const config = STATUS_CONFIG[status] || STATUS_CONFIG.scheduled;
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-semibold uppercase tracking-wide border ${config.className}`}
@@ -57,10 +49,6 @@ function StatusPill({ status }) {
     </span>
   );
 }
-
-/* ============================================================
-   AVATAR STACK (inline)
-   ============================================================ */
 
 const AVATAR_COLORS = [
   "bg-accent-blue",
@@ -78,21 +66,40 @@ function AvatarStack({ participants = [], extra = 0, size = "md" }) {
   };
   const cls = sizes[size];
   const shown = participants.slice(0, 4);
+  const AVATAR_COLORS = [
+    "bg-accent-blue",
+    "bg-accent-purple",
+    "bg-accent-emerald",
+    "bg-accent-rose",
+    "bg-accent-amber",
+  ];
 
   return (
     <div className="flex items-center -space-x-2">
       {shown.map((p, i) => {
         const name =
-          typeof p === "string" ? p : p?.name || p?.fullName || "U";
+          typeof p === "string"
+            ? p
+            : p?.fullName || p?.name || p?.email || "U";
         const initial = name[0]?.toUpperCase() || "U";
+        const avatar = typeof p === "object" ? p?.avatar : null;
         const color = AVATAR_COLORS[i % AVATAR_COLORS.length];
+
         return (
           <div
             key={i}
-            className={`${cls} ${color} border-2 border-card rounded-full flex items-center justify-center text-white font-bold`}
+            className={`${cls} ${!avatar ? color : "bg-surface"} border-2 border-card rounded-full flex items-center justify-center text-white font-bold overflow-hidden shrink-0`}
             title={name}
           >
-            {initial}
+            {avatar ? (
+              <img
+                src={avatar}
+                alt={name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              initial
+            )}
           </div>
         );
       })}
@@ -106,10 +113,6 @@ function AvatarStack({ participants = [], extra = 0, size = "md" }) {
     </div>
   );
 }
-
-/* ============================================================
-   HELPERS
-   ============================================================ */
 
 function formatTime(iso) {
   if (!iso) return "—";
@@ -136,20 +139,15 @@ function formatDateBox(iso) {
   };
 }
 
-function formatDuration(minutes) {
-  if (!minutes) return "Meeting";
-  if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m ? `${h}h ${m}m` : `${h}h`;
+function getUserId(u) {
+  if (!u) return null;
+  if (typeof u === "string") return u;
+  return u._id || u.id || null;
 }
-
-/* ============================================================
-   MEETING CARD
-   ============================================================ */
 
 export default function MeetingCard({
   meeting = {},
+  currentUserId,
   onJoin,
   onCopyLink,
   onStart,
@@ -160,21 +158,28 @@ export default function MeetingCard({
     _id,
     title = "Untitled meeting",
     scheduledAt,
-    duration,
-    status = "upcoming",
+    status = "scheduled",
     participants = [],
     project,
     platform = "IntelliMeet",
+    host,
   } = meeting;
+
+  const hostId = getUserId(host);
+  const isHost = hostId && currentUserId && hostId === currentUserId;
 
   const participantCount = participants.length;
   const extra = Math.max(participantCount - 4, 0);
   const dateBox = formatDateBox(scheduledAt);
 
+  const isLive = status === "live";
+  const isCompleted = status === "completed";
+  const isScheduled = status === "scheduled" || status === "upcoming";
+  const isCancelled = status === "cancelled";
+
   return (
     <div className="rounded-2xl border border-line bg-card p-4 hover:shadow-md transition sm:p-5">
       <div className="flex flex-col sm:flex-row gap-4 sm:items-center">
-        {/* ===== Date box ===== */}
         <div className="hidden sm:flex flex-col items-center justify-center w-16 h-16 rounded-xl bg-surface border border-line shrink-0">
           <span className="text-[10px] font-semibold uppercase text-fg-3">
             {dateBox.month}
@@ -184,11 +189,14 @@ export default function MeetingCard({
           </span>
         </div>
 
-        {/* ===== Info ===== */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1.5">
             <StatusPill status={status} />
-
+            {isHost && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase text-accent-violet bg-accent-violet/15 border border-accent-violet/20">
+                Host
+              </span>
+            )}
             {project && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium bg-surface text-fg-2 border border-line">
                 {typeof project === "string" ? project : project?.name}
@@ -203,7 +211,7 @@ export default function MeetingCard({
           <div className="mt-1.5 flex items-center gap-3 flex-wrap text-xs text-fg-2">
             <span className="inline-flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              {formatTime(scheduledAt)} • {formatDuration(duration)}
+              {formatTime(scheduledAt)}
             </span>
             <span className="inline-flex items-center gap-1">
               <Video className="w-3 h-3" />
@@ -216,7 +224,6 @@ export default function MeetingCard({
           </div>
         </div>
 
-        {/* ===== Participants ===== */}
         {participantCount > 0 && (
           <div className="hidden md:block shrink-0">
             <AvatarStack
@@ -227,10 +234,8 @@ export default function MeetingCard({
           </div>
         )}
 
-        {/* ===== Actions ===== */}
         <div className="flex flex-wrap items-center gap-2 sm:justify-end shrink-0">
-          {/* Join (live only) */}
-          {status === "live" && (
+          {isLive && (
             <button
               onClick={() => onJoin?.(meeting)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent-blue hover:bg-accent-blue/90 text-white text-xs font-semibold transition shadow-lg shadow-accent-blue/25"
@@ -240,8 +245,7 @@ export default function MeetingCard({
             </button>
           )}
 
-          {/* Start (scheduled/upcoming) */}
-          {(status === "scheduled" || status === "upcoming") && onStart && (
+          {isHost && isScheduled && onStart && (
             <button
               onClick={() => onStart(meeting)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent-emerald hover:bg-accent-emerald/90 text-white text-xs font-semibold transition"
@@ -251,8 +255,7 @@ export default function MeetingCard({
             </button>
           )}
 
-          {/* End (live only) */}
-          {status === "live" && onEnd && (
+          {isHost && isLive && onEnd && (
             <button
               onClick={() => onEnd(meeting)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent-rose/15 hover:bg-accent-rose/25 text-accent-rose border border-accent-rose/20 text-xs font-semibold transition"
@@ -262,8 +265,7 @@ export default function MeetingCard({
             </button>
           )}
 
-          {/* View (completed only) */}
-          {status === "completed" && (
+          {isCompleted && (
             <Link
               to={`/meetings/${_id}`}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-surface hover:bg-card border border-line text-fg text-xs font-semibold transition"
@@ -273,32 +275,29 @@ export default function MeetingCard({
             </Link>
           )}
 
-          {/* Copy link (scheduled/live/upcoming) */}
-          {(status === "scheduled" ||
-            status === "live" ||
-            status === "upcoming") &&
-            onCopyLink && (
-              <button
-                onClick={() => onCopyLink(meeting)}
-                className="p-2 rounded-lg hover:bg-surface text-fg-2 transition"
-                title="Copy meeting link"
-              >
-                <Copy className="w-3.5 h-3.5" />
-              </button>
-            )}
-
-          {/* Delete (not live/completed) */}
-          {status !== "live" && status !== "completed" && onDelete && (
+          {(isScheduled || isLive) && onCopyLink && (
             <button
-              onClick={() => onDelete(meeting)}
-              className="p-2 rounded-lg bg-accent-rose/15 hover:bg-accent-rose/25 text-accent-rose border border-accent-rose/20 transition"
-              title="Delete meeting"
+              onClick={() => onCopyLink(meeting)}
+              className="p-2 rounded-lg hover:bg-surface text-fg-2 transition"
+              title="Copy meeting link"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Copy className="w-3.5 h-3.5" />
             </button>
           )}
 
-          {/* More / Details */}
+          {isHost &&
+            !isLive &&
+            (isScheduled || isCompleted || isCancelled) &&
+            onDelete && (
+              <button
+                onClick={() => onDelete(meeting)}
+                className="p-2 rounded-lg bg-accent-rose/15 hover:bg-accent-rose/25 text-accent-rose border border-accent-rose/20 transition"
+                title="Delete meeting"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+
           <Link
             to={`/meetings/${_id}`}
             className="p-2 rounded-lg hover:bg-surface text-fg-2 transition"

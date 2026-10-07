@@ -25,7 +25,6 @@ const navItems = [
   { name: "Tasks", to: "/tasks", icon: ListChecks },
   { name: "Analytics", to: "/analytics", icon: BarChart3 },
   { name: "Notifications", to: "/notifications", icon: Bell },
-  { name: "Profile", to: "/profile", icon: User },
   { name: "Settings", to: "/settings", icon: Settings },
 ];
 

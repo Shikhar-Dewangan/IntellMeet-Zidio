@@ -28,7 +28,6 @@ import Recordings from "../pages/recordings/Recordings.jsx";
 import RecordingDetails from "../pages/recordings/RecordingDetails.jsx";
 import Analytics from "../pages/analytics/Analytics.jsx";
 import Notifications from "../pages/notifications/Notifications.jsx";
-import Profile from "../pages/profile/Profile.jsx";
 import Settings from "../pages/settings/Settings.jsx";
 
 function AppRoutes() {
@@ -109,7 +108,6 @@ function AppRoutes() {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/notifications" element={<Notifications />} />
-          <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Route>

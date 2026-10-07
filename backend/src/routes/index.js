@@ -25,9 +25,9 @@ const registerRoutes = (app) => {
     app.use("/api/v1/notifications", notificationRoutes);
     app.use("/api/v1/recordings", recordingRoutes);
     app.use("/api/v1/analytics", analyticsRoutes);
-    app.use("/api/transcripts", transcriptRoutes);
-    app.use( "/api/ai-insights", aiInsightRoutes);
-    app.use("/api/live-transcription", liveTranscription);
+    app.use("/api/v1/transcripts", transcriptRoutes);
+    app.use( "/api/v1/ai-insights", aiInsightRoutes);
+    app.use("/api/v1/live-transcription", liveTranscription);
 };
 
 export default registerRoutes;

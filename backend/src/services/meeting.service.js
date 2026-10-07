@@ -100,6 +100,7 @@ const startMeetingLifecycle = async (
     meeting.status = "live";
     meeting.startedAt = new Date();
     meeting.endedAt = null;
+    meeting.lastActivityAt = new Date();
 
     await meeting.save();
 
@@ -126,8 +127,9 @@ const endMeetingLifecycle = async (
      */
     if (
         reason !== "host-inactivity" &&
-        meeting.host.toString() !==
-            hostId?.toString()
+        reason !== "auto-end-no-participants" &&
+        reason !== "auto-end-no-activity" &&    
+        meeting.host.toString() !== hostId?.toString()
     ) {
         throw new ApiError(
             403,
@@ -246,9 +248,9 @@ const scheduleHostInactivityEnd = (
             } catch (error) {
                 if (
                     error.statusCode !==
-                        409 &&
+                    409 &&
                     error.statusCode !==
-                        404
+                    404
                 ) {
                     console.error(
                         "Unable to end meeting after host inactivity:",
@@ -268,9 +270,28 @@ const scheduleHostInactivityEnd = (
     );
 };
 
+const touchMeetingActivity = async (meetingId) => {
+    if (!meetingId) return;
+
+    try {
+        await Meeting.findByIdAndUpdate(
+            meetingId,
+            { $set: { lastActivityAt: new Date() } },
+            { new: false }
+        );
+    } catch (error) {
+        // Log but don't throw — activity tracking is best-effort
+        console.error(
+            "Failed to touch meeting activity:",
+            error.message
+        );
+    }
+};
+
 export {
     startMeetingLifecycle,
     endMeetingLifecycle,
     scheduleHostInactivityEnd,
     clearHostInactivityEnd,
+    touchMeetingActivity,
 };

@@ -6,15 +6,18 @@ import { Toaster } from "react-hot-toast";
 import "./index.css";
 import App from "./App.jsx";
 import store from "./store/store.js";
-import { ThemeProvider } from "./Context/ThemeContext.jsx";
+import { ThemeProvider } from "./context/ThemeContext.jsx";
+import { AppearanceProvider } from "./context/AppearanceContext.jsx";
 
 createRoot(document.getElementById("root")).render(
   <Provider store={store}>
-    <ThemeProvider>
-      <BrowserRouter>
-        <App />
-        <Toaster position="top-right" reverseOrder={false} />
-      </BrowserRouter>
-    </ThemeProvider>
+      <ThemeProvider>
+    <AppearanceProvider>
+        <BrowserRouter>
+          <App />
+          <Toaster position="top-right" reverseOrder={false} />
+        </BrowserRouter>
+    </AppearanceProvider>
+      </ThemeProvider>
   </Provider>,
 );

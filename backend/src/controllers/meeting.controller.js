@@ -3,12 +3,15 @@ import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
 import Meeting from "../models/meeting.model.js";
 import { getSocketServer } from "../sockets/socket.js";
+import User from "../models/user.model.js";
 import {
     startMeetingLifecycle,
     endMeetingLifecycle,
     scheduleHostInactivityEnd,
     clearHostInactivityEnd,
 } from "../services/meeting.service.js";
+import { createNotification } from "../services/notification.service.js";
+import { processMeetingAI } from "../services/aiInsight.service.js";
 import crypto from "crypto";
 import { isValidObjectId } from "mongoose";
 
@@ -20,7 +23,9 @@ const generateMeetingCode = () => {
 const populateMeeting = (query) =>
     query
         .populate("host", "fullName email avatar")
-        .populate("participants", "fullName email avatar");
+        .populate("participants", "fullName email avatar")
+        .populate("invitedUsers.user", "fullName email avatar");
+
 
 // Create Meeting
 const createMeeting = asyncHandler(async (req, res) => {
@@ -133,13 +138,16 @@ const getMeetingById = asyncHandler(async (req, res) => {
                 participant?.toString()) === userId
     );
 
+
     const isAdmin = req.user.role === "admin";
 
-    if (!isHost && !isParticipant && !isAdmin) {
-        throw new ApiError(
-            403,
-            "You are not authorized to access this meeting"
-        );
+    const isInvited = meeting.invitedUsers?.some(
+        (invite) =>
+            (invite.user?._id?.toString() || invite.user?.toString()) === userId
+    );
+
+    if (!isHost && !isParticipant && !isInvited && !isAdmin) {
+        throw new ApiError(403, "You are not authorized to access this meeting");
     }
 
     return res.status(200).json(
@@ -426,6 +434,8 @@ const joinMeeting = asyncHandler(async (req, res) => {
 
     meeting.participants.push(userId);
 
+    meeting.lastActivityAt = new Date();
+
     await meeting.save();
 
     // Someone joined again.
@@ -491,6 +501,8 @@ const leaveMeeting = asyncHandler(async (req, res) => {
                 participantId.toString() !==
                 userId.toString()
         );
+
+    meeting.lastActivityAt = new Date();
 
     await meeting.save();
 
@@ -663,6 +675,285 @@ const endMeeting = asyncHandler(async (req, res) => {
     );
 });
 
+const inviteUsersToMeeting = asyncHandler(async (req, res) => {
+    const { meetingId } = req.params;
+    const { userIds } = req.body;
+
+    if (!isValidObjectId(meetingId)) {
+        throw new ApiError(400, "Invalid meeting ID");
+    }
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+        throw new ApiError(400, "At least one user must be selected");
+    }
+
+    const meeting = await Meeting.findById(meetingId);
+
+    if (!meeting) {
+        throw new ApiError(404, "Meeting not found");
+    }
+
+    const isHost =
+        meeting.host.toString() === req.user._id.toString();
+
+    const isAdmin = req.user.role === "admin";
+
+    if (!isHost && !isAdmin) {
+        throw new ApiError(
+            403,
+            "Only the meeting host or admin can invite users"
+        );
+    }
+
+    if (meeting.status === "completed") {
+        throw new ApiError(
+            400,
+            "Cannot invite users to a completed meeting"
+        );
+    }
+
+    if (meeting.status === "cancelled") {
+        throw new ApiError(
+            400,
+            "Cannot invite users to a cancelled meeting"
+        );
+    }
+
+    const uniqueUserIds = [
+        ...new Set(userIds.map((id) => id.toString())),
+    ];
+
+    const users = await User.find({
+        _id: { $in: uniqueUserIds },
+    }).select("_id fullName email avatar");
+
+    if (users.length !== uniqueUserIds.length) {
+        throw new ApiError(
+            400,
+            "One or more selected users do not exist"
+        );
+    }
+
+    const participantIds = new Set(
+        meeting.participants.map((id) => id.toString())
+    );
+
+    const invitedUserIds = new Set(
+        meeting.invitedUsers.map((invite) =>
+            invite.user.toString()
+        )
+    );
+
+    const newInvitations = [];
+
+    for (const user of users) {
+        const userId = user._id.toString();
+
+        if (participantIds.has(userId)) {
+            continue;
+        }
+
+        if (invitedUserIds.has(userId)) {
+            continue;
+        }
+
+        newInvitations.push({
+            user: user._id,
+            status: "pending",
+        });
+    }
+
+    if (newInvitations.length === 0) {
+        throw new ApiError(
+            400,
+            "All selected users are already participants or invited"
+        );
+    }
+
+    meeting.invitedUsers.push(...newInvitations);
+    await meeting.save();
+
+    // Create notifications for invited users
+    const hostName =
+        req.user.fullName || req.user.email || "Someone";
+
+    try {
+        const notificationPromises = newInvitations.map((invitation) =>
+            createNotification({
+                recipient: invitation.user,
+                type: "meeting_invitation",
+                title: "Meeting Invitation",
+                message: `${hostName} invited you to "${meeting.title}"`,
+                relatedMeeting: meeting._id,
+            }),
+        );
+        await Promise.all(notificationPromises);
+    } catch (err) {
+        console.error("Failed to create invitation notifications:", err.message);
+    }
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                invitedUsers: newInvitations,
+            },
+            "Meeting invitations sent successfully"
+        )
+    );
+});
+
+const acceptMeetingInvitation = asyncHandler(async (req, res) => {
+    const { meetingId } = req.params;
+
+    if (!isValidObjectId(meetingId)) {
+        throw new ApiError(400, "Invalid meeting ID");
+    }
+
+    const meeting = await Meeting.findById(meetingId);
+
+    if (!meeting) {
+        throw new ApiError(404, "Meeting not found");
+    }
+
+    const userId = req.user._id.toString();
+
+    const invitation = meeting.invitedUsers.find(
+        (invite) =>
+            (invite.user?._id?.toString() || invite.user?.toString()) ===
+            userId
+    );
+
+    if (!invitation) {
+        throw new ApiError(404, "No invitation found for this meeting");
+    }
+
+    if (invitation.status === "accepted") {
+        throw new ApiError(400, "Invitation has already been accepted");
+    }
+
+    if (invitation.status === "rejected") {
+        throw new ApiError(
+            400,
+            "Invitation has already been rejected. Cannot accept now."
+        );
+    }
+
+    // Mark invitation as accepted
+    invitation.status = "accepted";
+
+    // Add to participants if not already present
+    const alreadyParticipant = meeting.participants.some(
+        (participantId) => participantId.toString() === userId
+    );
+
+    if (!alreadyParticipant) {
+        meeting.participants.push(req.user._id);
+    }
+
+    await meeting.save();
+
+    const updatedMeeting = await populateMeeting(
+        Meeting.findById(meeting._id)
+    );
+
+    // Notify host that invitation was accepted
+    try {
+        const inviteeName = req.user.fullName || req.user.email || "A user";
+        await createNotification({
+            recipient: meeting.host,
+            type: "meeting_invitation",
+            title: "Invitation Accepted",
+            message: `${inviteeName} accepted your invitation to "${meeting.title}"`,
+            relatedMeeting: meeting._id,
+        });
+    } catch (err) {
+        console.error("Failed to notify host:", err.message);
+    }
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            updatedMeeting,
+            "Invitation accepted successfully"
+        )
+    );
+});
+
+const rejectMeetingInvitation = asyncHandler(async (req, res) => {
+    const { meetingId } = req.params;
+
+    if (!isValidObjectId(meetingId)) {
+        throw new ApiError(400, "Invalid meeting ID");
+    }
+
+    const meeting = await Meeting.findById(meetingId);
+
+    if (!meeting) {
+        throw new ApiError(404, "Meeting not found");
+    }
+
+    const userId = req.user._id.toString();
+
+    const invitation = meeting.invitedUsers.find(
+        (invite) =>
+            (invite.user?._id?.toString() || invite.user?.toString()) ===
+            userId
+    );
+
+    if (!invitation) {
+        throw new ApiError(404, "No invitation found for this meeting");
+    }
+
+    if (invitation.status === "accepted") {
+        throw new ApiError(
+            400,
+            "Invitation has already been accepted. Cannot reject now."
+        );
+    }
+
+    if (invitation.status === "rejected") {
+        throw new ApiError(400, "Invitation has already been rejected");
+    }
+
+    invitation.status = "rejected";
+
+    await meeting.save();
+
+    const updatedMeeting = await populateMeeting(
+        Meeting.findById(meeting._id)
+    );
+
+    //  Notify host that invitation was rejected
+    try {
+        const inviteeName = req.user.fullName || req.user.email || "A user";
+        await createNotification({
+            recipient: meeting.host,
+            type: "meeting_invitation",
+            title: "Invitation Declined",
+            message: `${inviteeName} declined your invitation to "${meeting.title}"`,
+            relatedMeeting: meeting._id,
+        });
+    } catch (err) {
+        console.error("Failed to notify host (reject):", err.message);
+    }
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            updatedMeeting,
+            "Invitation rejected successfully"
+        )
+    );
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            updatedMeeting,
+            "Invitation rejected successfully"
+        )
+    );
+});
+
 export {
     createMeeting,
     getMeetingById,
@@ -673,5 +964,8 @@ export {
     leaveMeeting,
     startMeeting,
     endMeeting,
+    inviteUsersToMeeting,
+    acceptMeetingInvitation,
+    rejectMeetingInvitation,
 };
 

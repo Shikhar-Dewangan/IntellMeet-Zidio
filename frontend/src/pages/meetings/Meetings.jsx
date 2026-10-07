@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useSelector } from "react-redux";   // ← ADD
 import toast from "react-hot-toast";
 import {
   Calendar,
@@ -20,7 +21,6 @@ import {
 } from "../../services/meeting.service.js";
 import { getApiError, unwrapApiList } from "../../utils/apiData.js";
 
-// Existing shared components
 import {
   EmptyState,
   FilterBar,
@@ -29,19 +29,25 @@ import {
   Tabs,
 } from "../../components/ui/Shared.jsx";
 
-// New reusable components
 import OverviewHero from "../../components/ui/OverviewHeroCard.jsx";
 import StatCard from "../../components/ui/StatCard.jsx";
 import MeetingCard from "../../components/meeting/MeetingCard.jsx";
 
+// ← ADD helper
+const getUserId = (u) => {
+  if (!u) return null;
+  if (typeof u === "string") return u;
+  return u._id || u.id || null;
+};
+
 export default function Meetings() {
   const navigate = useNavigate();
+  const currentUserId = useSelector((s) => getUserId(s.auth.user)); // ← ADD
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  /* ============ FETCH ============ */
   const loadMeetings = async () => {
     try {
       const response = await getMyMeetings();
@@ -58,7 +64,14 @@ export default function Meetings() {
     loadMeetings();
   }, []);
 
-  /* ============ ACTION WRAPPER ============ */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadMeetings();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const actOnMeeting = async (operation, id, message) => {
     try {
       await operation(id);
@@ -79,7 +92,17 @@ export default function Meetings() {
     toast.success("Meeting link copied");
   };
 
-  /* ============ STATS ============ */
+  // ← ADD
+  const handleDelete = (meeting) => {
+    if (
+      !window.confirm(
+        `Delete "${meeting.title}"? This action cannot be undone.`,
+      )
+    )
+      return;
+    actOnMeeting(deleteMeeting, meeting._id, "Meeting deleted");
+  };
+
   const stats = useMemo(() => {
     const now = Date.now();
     return {
@@ -94,7 +117,6 @@ export default function Meetings() {
     };
   }, [meetings]);
 
-  /* ============ FILTER ============ */
   const visibleMeetings = useMemo(() => {
     const query = search.trim().toLowerCase();
     return meetings
@@ -118,10 +140,9 @@ export default function Meetings() {
       });
   }, [meetings, search, statusFilter]);
 
-  /* ============ TABS WITH COUNTS ============ */
   const tabs = [
     { value: "all", label: `All (${stats.total})` },
-    { value: "upcoming", label: `Upcoming (${stats.upcoming})` },
+    { value: "scheduled", label: `Upcoming (${stats.upcoming})` },
     { value: "live", label: `Live (${stats.live})` },
     { value: "completed", label: `Completed (${stats.completed})` },
   ];
@@ -130,7 +151,6 @@ export default function Meetings() {
 
   return (
     <div className="space-y-5">
-      {/* ================= HERO ================= */}
       <OverviewHero
         badge="Meetings"
         title="Plan conversations. Turn them into progress."
@@ -147,7 +167,6 @@ export default function Meetings() {
         }}
       />
 
-      {/* ================= STAT CARDS ================= */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Meetings"
@@ -179,7 +198,6 @@ export default function Meetings() {
         />
       </div>
 
-      {/* ================= TABS + SEARCH ================= */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <Tabs tabs={tabs} active={statusFilter} onChange={setStatusFilter} />
 
@@ -201,15 +219,15 @@ export default function Meetings() {
               className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 pl-9 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 sm:w-40"
             >
               <option value="all">All status</option>
-              <option value="upcoming">Upcoming</option>
+              <option value="scheduled">Scheduled</option>
               <option value="live">Live</option>
               <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
             </select>
           </div>
         </FilterBar>
       </div>
 
-      {/* ================= MEETINGS LIST ================= */}
       {visibleMeetings.length === 0 ? (
         <SectionCard>
           <EmptyState
@@ -237,6 +255,7 @@ export default function Meetings() {
             <MeetingCard
               key={meeting._id}
               meeting={meeting}
+              currentUserId={currentUserId}
               onJoin={handleJoin}
               onCopyLink={handleCopyLink}
               onStart={() =>
@@ -245,9 +264,7 @@ export default function Meetings() {
               onEnd={() =>
                 actOnMeeting(endMeeting, meeting._id, "Meeting ended")
               }
-              onDelete={() =>
-                actOnMeeting(deleteMeeting, meeting._id, "Meeting deleted")
-              }
+              onDelete={() => handleDelete(meeting)}
             />
           ))}
         </div>

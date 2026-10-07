@@ -20,15 +20,9 @@ const generateAccessTokenAndRefreshToken = async (user) => {
     const refreshToken = user.generateRefreshToken();
 
     user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
 
-    await user.save({
-        validateBeforeSave: false,
-    });
-
-    return {
-        accessToken,
-        refreshToken,
-    };
+    return { accessToken, refreshToken };
 };
 
 
@@ -100,7 +94,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const user = await User.findOne({
     email: normalizedEmail,
-  }).select("+password");
+  }).select("+password +refreshToken");
 
   if (!user) {
     throw new ApiError(401, "Invalid email or password");
@@ -159,7 +153,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 
     const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
 
-    const user = await User.findById(decodedToken?._id)
+const user = await User.findById(decodedToken?._id).select("+refreshToken");
 
     if (!user || !user.isActive) {
       throw new ApiError(401, "User not found. Please login again.");
