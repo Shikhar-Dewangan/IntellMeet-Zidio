@@ -44,6 +44,7 @@ export default function MeetingRoom() {
   const [loading, setLoading] = useState(true);
   const [fatalError, setFatalError] = useState(null);
   const [streamReady, setStreamReady] = useState(false);
+  const [localStream, setLocalStream] = useState(null);   // 👈 ADDED
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -73,6 +74,7 @@ export default function MeetingRoom() {
     enabled: joined,
     onLocalStream: (stream) => {
       localStreamRef.current = stream;
+      setLocalStream(stream);        // 👈 ADDED
       setStreamReady(true);
     },
   });
@@ -148,7 +150,7 @@ export default function MeetingRoom() {
           { urls: "stun:stun.l.google.com:19302" },
           { urls: "stun:stun1.l.google.com:19302" },
         ],
-         iceCandidatePoolSize: 10,
+        iceCandidatePoolSize: 10,
       });
 
       localStreamRef.current?.getTracks().forEach((track) => {
@@ -603,7 +605,7 @@ export default function MeetingRoom() {
             <RecordingControls
               meetingId={meetingId}
               enabled={joined}
-              streamToRecord={localStreamRef.current}
+              streamToRecord={localStream}
               recording={recording}
               onToggleRecording={setRecording}
             />

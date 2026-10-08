@@ -9,7 +9,7 @@ export const createRecording = async (recordingData) => {
   }
 
   // ✅ Other metadata fields
-  const metaFields = ["meetingId", "title", "description", "duration"];
+  const metaFields = ["meeting", "title", "description", "duration"];
   metaFields.forEach((key) => {
     const value = recordingData[key];
     if (value !== undefined && value !== null) {

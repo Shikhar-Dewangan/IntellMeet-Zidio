@@ -13,6 +13,7 @@ import { getMyNotifications } from "../../services/notification.service.js";
 import { getRecordings } from "../../services/recording.service.js";
 import { getApiError, unwrapApiData, unwrapApiList } from "../../utils/apiData.js";
 import { EmptyState, LoadingState } from "../../components/ui/Shared.jsx";
+import { create } from "axios";
 
 /* ───────────────────────────────────────────────────────────
    ROUTES — change here if your paths differ
@@ -290,7 +291,7 @@ export default function Dashboard() {
             </p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <Link
-                to={ROUTES.newMeeting}
+                to={ROUTES.meetings}
                 className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition ${PRIMARY_BTN}`}
               >
                 <Plus className="h-4 w-4" /> New Meeting

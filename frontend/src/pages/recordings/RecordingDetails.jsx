@@ -2,24 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
-  ArrowLeft, Bot, FileText, ListTodo, Trash2, Video, PlayCircle,
-  Mic, Sparkles, Clock3, CalendarDays, User as UserIcon, Download,
-  CheckCircle2, Loader2, Copy, Check, Calendar, Pencil, Save, X,
-  ListChecks,
+  ArrowLeft, Bot, ListTodo, Trash2, Video, Mic, Sparkles, Clock3,
+  CalendarDays, User as UserIcon, CheckCircle2, Loader2, Copy,
+  Pencil, Save, X, ListChecks, Download, Maximize2, PlayCircle,
 } from "lucide-react";
 import {
-  processRecording,
-  getRecordingById,
-  updateRecording,
-  deleteRecording,
+  processRecording, getRecordingById, updateRecording, deleteRecording,
 } from "../../services/recording.service.js";
 import { createTask } from "../../services/task.service.js";
 import { getApiError, unwrapApiData } from "../../utils/apiData.js";
 import {
-  EmptyState,
-  LoadingState,
-  SectionCard,
-  Tabs,
+  EmptyState, LoadingState, SectionCard, Tabs,
 } from "../../components/ui/Shared.jsx";
 
 /* ============================================================
@@ -38,10 +31,7 @@ function formatDuration(seconds) {
 function formatDate(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString([], {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
+    weekday: "short", month: "short", day: "numeric", year: "numeric",
   });
 }
 
@@ -51,6 +41,8 @@ function formatDate(iso) {
 export default function RecordingDetails() {
   const { recordingId } = useParams();
   const navigate = useNavigate();
+
+  // ============ ALL HOOKS AT TOP (Rule of Hooks) ============
   const [recording, setRecording] = useState(null);
   const [actionItems, setActionItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -61,31 +53,53 @@ export default function RecordingDetails() {
   const [saving, setSaving] = useState(false);
   const [creatingTaskId, setCreatingTaskId] = useState(null);
   const [createdTasks, setCreatedTasks] = useState(new Set());
+  const [copied, setCopied] = useState(false);
 
-  /* ============ FETCH ============ */
-  const loadRecording = async () => {
-    try {
-      const response = await getRecordingById(recordingId);
-      const data = unwrapApiData(response);
-      setRecording(data);
-      setActionItems(data?.actionItems || []);
-      setDraft({
-        title: data?.title || "",
-        description: data?.description || "",
-      });
-    } catch (error) {
-      toast.error(getApiError(error, "Could not load recording"));
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Derived values (no hooks, safe)
+  const hasSummary = recording?.summary?.trim();
+  const hasTranscript = recording?.transcription?.trim();
+  const hasKeyPoints = recording?.keyPoints?.length > 0;
+  const ownerName = recording?.recordedBy?.fullName || "Unknown";
+  const duration = formatDuration(recording?.duration);
 
+  // ✅ useMemo BEFORE any early return
+  const tabs = useMemo(
+    () => [
+      { value: "summary", label: `Summary${hasSummary ? "" : " ⚠"}` },
+      { value: "transcript", label: `Transcript${hasTranscript ? "" : " ⚠"}` },
+      {
+        value: "actions",
+        label: `Action Items${actionItems.length ? ` (${actionItems.length})` : ""}`,
+      },
+    ],
+    [hasSummary, hasTranscript, actionItems.length],
+  );
+
+  // ============ FETCH ============
   useEffect(() => {
+    let active = true;
+    const loadRecording = async () => {
+      try {
+        const response = await getRecordingById(recordingId);
+        const data = unwrapApiData(response);
+        if (!active) return;
+        setRecording(data);
+        setActionItems(data?.actionItems || []);
+        setDraft({
+          title: data?.title || "",
+          description: data?.description || "",
+        });
+      } catch (error) {
+        if (active) toast.error(getApiError(error, "Could not load recording"));
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
     loadRecording();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { active = false; };
   }, [recordingId]);
 
-  /* ============ PROCESS AI ============ */
+  /* ============ ACTIONS ============ */
   const process = async () => {
     setProcessing(true);
     try {
@@ -100,7 +114,6 @@ export default function RecordingDetails() {
     }
   };
 
-  /* ============ CREATE TASK ============ */
   const createActionTask = async (item) => {
     setCreatingTaskId(item._id || item.title);
     try {
@@ -121,7 +134,6 @@ export default function RecordingDetails() {
     }
   };
 
-  /* ============ UPDATE ============ */
   const save = async () => {
     setSaving(true);
     try {
@@ -139,7 +151,6 @@ export default function RecordingDetails() {
     }
   };
 
-  /* ============ DELETE ============ */
   const remove = async () => {
     if (!window.confirm("Delete this recording? This cannot be undone.")) return;
     try {
@@ -154,7 +165,18 @@ export default function RecordingDetails() {
   const copyTranscript = () => {
     if (!recording?.transcription) return;
     navigator.clipboard?.writeText(recording.transcription);
+    setCopied(true);
     toast.success("Transcript copied");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const downloadRecording = () => {
+    if (!recording?.recordingUrl) return;
+    const a = document.createElement("a");
+    a.href = recording.recordingUrl;
+    a.download = `${recording.title || "recording"}.webm`;
+    a.target = "_blank";
+    a.click();
   };
 
   /* ============ LOADING ============ */
@@ -191,22 +213,7 @@ export default function RecordingDetails() {
     );
   }
 
-  /* ============ DERIVED ============ */
-  const hasSummary = recording.summary?.trim();
-  const hasTranscript = recording.transcription?.trim();
-  const hasKeyPoints = recording.keyPoints?.length > 0;
-  const ownerName = recording.recordedBy?.fullName || "Unknown";
-  const duration = formatDuration(recording.duration);
-
-  const tabs = useMemo(
-    () => [
-      { value: "summary", label: `Summary${hasSummary ? "" : " ⚠"}` },
-      { value: "transcript", label: `Transcript${hasTranscript ? "" : " ⚠"}` },
-      { value: "actions", label: `Action Items${actionItems.length ? ` (${actionItems.length})` : ""}` },
-    ],
-    [hasSummary, hasTranscript, actionItems.length],
-  );
-
+  /* ============ RENDER ============ */
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       {/* ============ BACK ============ */}
@@ -231,9 +238,7 @@ export default function RecordingDetails() {
               />
               <textarea
                 value={draft.description}
-                onChange={(e) =>
-                  setDraft({ ...draft, description: e.target.value })
-                }
+                onChange={(e) => setDraft({ ...draft, description: e.target.value })}
                 rows={2}
                 placeholder="Add description..."
                 className="w-full text-sm text-fg-2 bg-transparent border-b border-line focus:border-accent-500 focus:outline-none resize-none pb-1"
@@ -244,11 +249,7 @@ export default function RecordingDetails() {
                   disabled={saving}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-accent-600 hover:bg-accent-700 disabled:opacity-60 px-3 py-1.5 text-xs font-semibold text-white transition"
                 >
-                  {saving ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Save className="h-3 w-3" />
-                  )}
+                  {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                   Save
                 </button>
                 <button
@@ -278,7 +279,6 @@ export default function RecordingDetails() {
                 </p>
               )}
 
-              {/* Meta */}
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-fg-3">
                 <span className="inline-flex items-center gap-1.5">
                   <Video className="h-3.5 w-3.5" />
@@ -301,7 +301,6 @@ export default function RecordingDetails() {
           )}
         </div>
 
-        {/* Actions */}
         {!editing && (
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
@@ -344,23 +343,34 @@ export default function RecordingDetails() {
       {/* ============ PLAYER ============ */}
       <SectionCard>
         {recording.recordingUrl ? (
-          <div className="relative bg-black">
+          <div className="relative bg-black rounded-xl overflow-hidden group">
             <video
               controls
-              className="aspect-video w-full"
+              preload="metadata"
+              playsInline
+              className="aspect-video w-full bg-black"
               src={recording.recordingUrl}
-              poster=""
-            />
+            >
+              Your browser does not support video playback.
+            </video>
+
+            {/* Download overlay button (top-right) */}
+            <button
+              onClick={downloadRecording}
+              className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-lg bg-black/70 hover:bg-black/90 backdrop-blur px-3 py-2 text-xs font-semibold text-white opacity-0 group-hover:opacity-100 transition"
+              title="Download recording"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download
+            </button>
           </div>
         ) : (
-          <div className="flex min-h-70s-center justify-center bg-linear-to-br from-surface to-page p-8 text-center">
+          <div className="flex min-h-70 items-center justify-center bg-linear-to-br from-surface to-page p-8 text-center rounded-xl">
             <div className="space-y-3">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-500/15">
                 <Video className="h-7 w-7 text-accent-600 dark:text-accent-400" />
               </div>
-              <p className="text-sm font-medium text-fg">
-                Recording preview unavailable
-              </p>
+              <p className="text-sm font-medium text-fg">Recording preview unavailable</p>
               <p className="text-xs text-fg-3 max-w-xs mx-auto">
                 The media file is not yet available in this environment.
               </p>
@@ -422,11 +432,7 @@ export default function RecordingDetails() {
                   disabled={processing}
                   className="inline-flex items-center gap-2 rounded-xl bg-accent-600 hover:bg-accent-700 disabled:opacity-60 px-4 py-2.5 text-sm font-semibold text-white transition"
                 >
-                  {processing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Bot className="h-4 w-4" />
-                  )}
+                  {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
                   Generate AI Summary
                 </button>
               }
@@ -445,8 +451,8 @@ export default function RecordingDetails() {
                   onClick={copyTranscript}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card hover:bg-surface px-2.5 py-1.5 text-xs font-medium text-fg-2 transition"
                 >
-                  <Copy className="h-3 w-3" />
-                  Copy
+                  {copied ? <CheckCircle2 className="h-3 w-3 text-accent-emerald" /> : <Copy className="h-3 w-3" />}
+                  {copied ? "Copied!" : "Copy"}
                 </button>
               </div>
               <div className="rounded-xl border border-line bg-surface/50 p-4 text-sm leading-relaxed text-fg-2 whitespace-pre-wrap max-h-150 overflow-y-auto">
@@ -504,11 +510,7 @@ export default function RecordingDetails() {
                         disabled={isCreating}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-accent-600 hover:bg-accent-700 disabled:opacity-60 px-3 py-2 text-xs font-semibold text-white transition shrink-0"
                       >
-                        {isCreating ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <ListTodo className="h-3.5 w-3.5" />
-                        )}
+                        {isCreating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListTodo className="h-3.5 w-3.5" />}
                         Create Task
                       </button>
                     )}
@@ -527,11 +529,7 @@ export default function RecordingDetails() {
                   disabled={processing}
                   className="inline-flex items-center gap-2 rounded-xl bg-accent-600 hover:bg-accent-700 disabled:opacity-60 px-4 py-2.5 text-sm font-semibold text-white transition"
                 >
-                  {processing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Bot className="h-4 w-4" />
-                  )}
+                  {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
                   Generate AI
                 </button>
               }

@@ -141,9 +141,9 @@ const createRecording = asyncHandler(
          */
         if (
             meetingDoc.status ===
-                "scheduled" ||
+            "scheduled" ||
             meetingDoc.status ===
-                "cancelled"
+            "cancelled"
         ) {
             throw new ApiError(
                 400,
@@ -207,7 +207,7 @@ const createRecording = asyncHandler(
             Number.isFinite(
                 parsedDuration
             ) &&
-            parsedDuration >= 0
+                parsedDuration >= 0
                 ? parsedDuration
                 : 0;
 
@@ -307,7 +307,7 @@ const processRecording = asyncHandler(
         if (
             req.user.role !== "admin" &&
             recording.recordedBy.toString() !==
-                req.user._id.toString()
+            req.user._id.toString()
         ) {
             throw new ApiError(
                 403,
@@ -425,9 +425,9 @@ const getRecordings = asyncHandler(
             req.user.role === "admin"
                 ? {}
                 : {
-                      recordedBy:
-                          req.user._id,
-                  };
+                    recordedBy:
+                        req.user._id,
+                };
 
         const recordings =
             await Recording.find(
@@ -503,7 +503,7 @@ const getRecordingById = asyncHandler(
             idString(
                 recording.recordedBy
             ) !==
-                req.user._id.toString()
+            req.user._id.toString()
         ) {
             throw new ApiError(
                 403,
@@ -567,7 +567,7 @@ const updateRecording = asyncHandler(
         if (
             req.user.role !== "admin" &&
             recording.recordedBy.toString() !==
-                req.user._id.toString()
+            req.user._id.toString()
         ) {
             throw new ApiError(
                 403,
@@ -578,7 +578,7 @@ const updateRecording = asyncHandler(
         if (title !== undefined) {
             if (
                 typeof title !==
-                    "string" ||
+                "string" ||
                 title.trim() === ""
             ) {
                 throw new ApiError(
@@ -640,7 +640,7 @@ const updateRecording = asyncHandler(
          */
         if (
             recordingUrl !==
-                undefined &&
+            undefined &&
             recordingUrl !== ""
         ) {
             const oldUrl =
@@ -649,7 +649,7 @@ const updateRecording = asyncHandler(
             if (
                 oldUrl &&
                 oldUrl !==
-                    recordingUrl &&
+                recordingUrl &&
                 recording.publicId
             ) {
                 await deleteRecordingFromCloudinary(
@@ -741,7 +741,7 @@ const deleteRecording = asyncHandler(
         if (
             req.user.role !== "admin" &&
             recording.recordedBy.toString() !==
-                req.user._id.toString()
+            req.user._id.toString()
         ) {
             throw new ApiError(
                 403,

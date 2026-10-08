@@ -161,7 +161,7 @@ export default function NotificationPanel({ open, onClose, socketRef }) {
       <div className="border-t border-line p-2">
         <Link
           to="/notifications"
-          onClick={onClose}
+          onClick ={navigate => navigate("/notifications")}
           className="block w-full text-center rounded-lg py-2 text-xs font-semibold text-accent-600 dark:text-accent-400 hover:bg-surface transition"
         >
           View all notifications

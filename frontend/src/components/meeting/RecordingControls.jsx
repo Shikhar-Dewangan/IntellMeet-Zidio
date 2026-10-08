@@ -11,8 +11,14 @@ export default function RecordingControls({
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const intervalRef = useRef(null);
+  const secondsRef = useRef(0);           // 👈 ADDED
   const [seconds, setSeconds] = useState(0);
   const [uploading, setUploading] = useState(false);
+
+  // 👈 ADDED: keep secondsRef in sync
+  useEffect(() => {
+    secondsRef.current = seconds;
+  }, [seconds]);
 
   useEffect(() => {
     if (!recording) {
@@ -23,6 +29,7 @@ export default function RecordingControls({
       return;
     }
     setSeconds(0);
+    secondsRef.current = 0;
     intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => {
       if (intervalRef.current) {
@@ -49,20 +56,24 @@ export default function RecordingControls({
       chunksRef.current = [];
 
       recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) chunksRef.current.push(event.data);
+        if (event.data && event.data.size > 0) {
+          chunksRef.current.push(event.data);
+          console.log("🎥 Chunk received:", event.data.size, "bytes");  // 👈 DEBUG
+        }
       };
 
       recorder.onstop = async () => {
         const blob = new Blob(chunksRef.current, { type: mimeType });
+        console.log("🎥 Final blob size:", blob.size, "bytes");  // 👈 DEBUG
         chunksRef.current = [];
         if (blob.size === 0) {
-          toast.error("Recording was empty");
+          toast.error("Recording was empty — check mic/camera permissions");
           return;
         }
         await uploadRecording(blob);
       };
 
-      recorder.start(1000);
+      recorder.start(1000);   // har 1 second me chunk collect
       onRecordingStarted?.();
       toast.success("Recording started");
     } catch (error) {
@@ -82,12 +93,17 @@ export default function RecordingControls({
   const uploadRecording = async (blob) => {
     setUploading(true);
     try {
-      const file = new File([blob], `meeting-${meetingId}-${Date.now()}.webm`, { type: blob.type || "video/webm" });
+      const file = new File(
+        [blob],
+        `meeting-${meetingId}-${Date.now()}.webm`,   // 👈 .id hata diya
+        { type: blob.type || "video/webm" }
+      );
+
       const response = await createRecording({
-        meetingId,
+        meeting: meetingId,
         file,
         title: "Meeting recording",
-        durationSeconds: seconds,
+        duration: secondsRef.current,   // 👈 durationSeconds → duration, aur ref use kiya
       });
       toast.success("Recording uploaded");
       onRecordingUploaded?.(response);
