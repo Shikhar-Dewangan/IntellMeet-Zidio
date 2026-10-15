@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
  * POST /live-transcription/:meetingId/chunk
  *
  * Receives a 15-second audio chunk from the browser,
- * transcribes it via OpenAI, saves as a transcript segment,
+ * transcribes it via the configured speech provider, saves as a transcript segment,
  * and broadcasts via socket to everyone in the meeting.
  */
 const uploadLiveTranscriptChunk = asyncHandler(async (req, res) => {
@@ -59,7 +59,7 @@ const uploadLiveTranscriptChunk = asyncHandler(async (req, res) => {
     // 4. Read from disk
     const audioBuffer = await readFile(req.file.path);
 
-    // 5. Transcribe via OpenAI
+    // 5. Transcribe via the configured speech provider
     const { text, language } = await transcribeAudioChunk({
         buffer: audioBuffer,
         filename: req.file.originalname || "chunk.webm",

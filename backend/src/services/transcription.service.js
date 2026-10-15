@@ -26,7 +26,10 @@ import {
     pipeline,
 } from "node:stream/promises";
 
-import OpenAI from "openai";
+import {
+    DeepgramClient,
+    DeepgramError,
+} from "@deepgram/sdk";
 
 import ApiError from "../utils/ApiError.js";
 
@@ -34,21 +37,75 @@ import {
     buildCloudinaryFolder,
 } from "../utils/FileUplode.js";
 
-let openAIClient;
+let deepgramClient;
 
-const getOpenAIClient = () => {
-    if (!process.env.OPENAI_API_KEY) {
+const getDeepgramClient = () => {
+    if (!process.env.DEEPGRAM_API_KEY) {
         throw new ApiError(
             503,
             "Transcription service is not configured"
         );
     }
 
-    openAIClient ||= new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
+    deepgramClient ||= new DeepgramClient({
+        apiKey: process.env.DEEPGRAM_API_KEY,
     });
 
-    return openAIClient;
+    return deepgramClient;
+};
+
+const getTranscriptResult = (result) => {
+    const channel =
+        result?.results?.channels?.[0];
+
+    const transcript =
+        channel?.alternatives?.[0]?.transcript;
+
+    if (typeof transcript !== "string") {
+        throw new ApiError(
+            502,
+            "Transcription provider returned an invalid response"
+        );
+    }
+
+    return {
+        text: transcript.trim(),
+        language:
+            typeof channel.detected_language ===
+            "string"
+                ? channel.detected_language
+                : null,
+    };
+};
+
+const getTranscriptionOptions = (
+    model
+) => ({
+    model,
+    language:
+        process.env
+            .DEEPGRAM_TRANSCRIPTION_LANGUAGE ||
+        "multi",
+    smart_format: true,
+    detect_language: true,
+});
+
+const logProviderFailure = (
+    context,
+    error
+) => {
+    if (error instanceof DeepgramError) {
+        console.error(
+            `${context} failed (Deepgram status ${error.statusCode || "unknown"})`
+        );
+
+        return;
+    }
+
+    console.error(
+        `${context} failed:`,
+        error.message
+    );
 };
 
 const getAllowedExtension = (
@@ -297,23 +354,23 @@ const transcribeRecording =
 
         try {
             const result =
-                await getOpenAIClient()
-                    .audio
-                    .transcriptions
-                    .create({
-                        file:
-                            createReadStream(
-                                localFilePath
-                            ),
-
-                        model:
+                await getDeepgramClient()
+                    .listen
+                    .v1
+                    .media
+                    .transcribeFile(
+                        createReadStream(
+                            localFilePath
+                        ),
+                        getTranscriptionOptions(
                             process.env
-                                .OPENAI_TRANSCRIPTION_MODEL ||
-                            "gpt-4o-mini-transcribe",
-                    });
+                                .DEEPGRAM_TRANSCRIPTION_MODEL ||
+                            "nova-3"
+                        )
+                    );
 
-            const text =
-                result?.text?.trim();
+            const { text } =
+                getTranscriptResult(result);
 
             if (!text) {
                 throw new ApiError(
@@ -325,14 +382,14 @@ const transcribeRecording =
             return text;
         } catch (error) {
             if (
-                error.statusCode
+                error instanceof ApiError
             ) {
                 throw error;
             }
 
-            console.error(
-                "Recording transcription failed:",
-                error.message
+            logProviderFailure(
+                "Recording transcription",
+                error
             );
 
             throw new ApiError(
@@ -450,54 +507,49 @@ const transcribeAudioChunk =
              * English.
              */
             const result =
-                await getOpenAIClient()
-                    .audio
-                    .transcriptions
-                    .create({
-                        file:
-                            createReadStream(
-                                localFilePath
-                            ),
-
-                        model:
+                await getDeepgramClient()
+                    .listen
+                    .v1
+                    .media
+                    .transcribeFile(
+                        createReadStream(
+                            localFilePath
+                        ),
+                        getTranscriptionOptions(
                             process.env
-                                .OPENAI_LIVE_TRANSCRIPTION_MODEL ||
+                                .DEEPGRAM_LIVE_TRANSCRIPTION_MODEL ||
                             process.env
-                                .OPENAI_TRANSCRIPTION_MODEL ||
-                            "gpt-4o-mini-transcribe",
+                                .DEEPGRAM_TRANSCRIPTION_MODEL ||
+                            "nova-3"
+                        )
+                    );
 
-                        response_format:
-                            "json",
-                    });
-
-            const text =
-                result?.text?.trim();
+            const {
+                text,
+                language,
+            } = getTranscriptResult(result);
 
             if (!text) {
                 return {
                     text: "",
-                    language:
-                        result?.language ||
-                        null,
+                    language,
                 };
             }
 
             return {
                 text,
-                language:
-                    result?.language ||
-                    null,
+                language,
             };
         } catch (error) {
             if (
-                error.statusCode
+                error instanceof ApiError
             ) {
                 throw error;
             }
 
-            console.error(
-                "Live audio transcription failed:",
-                error.message
+            logProviderFailure(
+                "Live audio transcription",
+                error
             );
 
             throw new ApiError(

@@ -1,21 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { Radio, Square, Loader2 } from "lucide-react";
 import { createRecording } from "../../services/recording.service.js";
 import { getApiError } from "../../utils/apiData.js";
 
 export default function RecordingControls({
-  meetingId, enabled = true, streamToRecord = null,
-  recording = false, onToggleRecording, onRecordingStarted, onRecordingStopped, onRecordingUploaded,
+  meetingId,
+  enabled = true,
+  streamToRecord = null,
+  recording = false,
+  controlled = false,
+  headless = false,
+  onToggleRecording,
+  onRecordingStarted,
+  onRecordingStopped,
+  onRecordingUploaded,
 }) {
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const intervalRef = useRef(null);
-  const secondsRef = useRef(0);           // 👈 ADDED
+  const secondsRef = useRef(0);
   const [seconds, setSeconds] = useState(0);
   const [uploading, setUploading] = useState(false);
 
-  // 👈 ADDED: keep secondsRef in sync
   useEffect(() => {
     secondsRef.current = seconds;
   }, [seconds]);
@@ -28,9 +35,11 @@ export default function RecordingControls({
       }
       return;
     }
+
     setSeconds(0);
     secondsRef.current = 0;
     intervalRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -39,63 +48,12 @@ export default function RecordingControls({
     };
   }, [recording]);
 
-  const startRecording = () => {
-    if (!streamToRecord) {
-      toast.error("No stream available to record");
-      return;
-    }
-    try {
-      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
-        ? "video/webm;codecs=vp9"
-        : MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
-        ? "video/webm;codecs=vp8"
-        : "video/webm";
-
-      const recorder = new MediaRecorder(streamToRecord, { mimeType });
-      recorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          chunksRef.current.push(event.data);
-          console.log("🎥 Chunk received:", event.data.size, "bytes");  // 👈 DEBUG
-        }
-      };
-
-      recorder.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        console.log("🎥 Final blob size:", blob.size, "bytes");  // 👈 DEBUG
-        chunksRef.current = [];
-        if (blob.size === 0) {
-          toast.error("Recording was empty — check mic/camera permissions");
-          return;
-        }
-        await uploadRecording(blob);
-      };
-
-      recorder.start(1000);   // har 1 second me chunk collect
-      onRecordingStarted?.();
-      toast.success("Recording started");
-    } catch (error) {
-      console.error(error);
-      toast.error("Could not start recording");
-    }
-  };
-
-  const stopRecording = () => {
-    const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") return;
-    try { recorder.stop(); } catch {}
-    onRecordingStopped?.();
-    toast.success("Recording stopped — uploading…");
-  };
-
-  const uploadRecording = async (blob) => {
+  const uploadRecording = useCallback(async (blob) => {
     setUploading(true);
     try {
       const file = new File(
         [blob],
-        `meeting-${meetingId}-${Date.now()}.webm`,   // 👈 .id hata diya
+        `meeting-${meetingId}-${Date.now()}.webm`,
         { type: blob.type || "video/webm" }
       );
 
@@ -103,8 +61,9 @@ export default function RecordingControls({
         meeting: meetingId,
         file,
         title: "Meeting recording",
-        duration: secondsRef.current,   // 👈 durationSeconds → duration, aur ref use kiya
+        duration: secondsRef.current,
       });
+
       toast.success("Recording uploaded");
       onRecordingUploaded?.(response);
     } catch (error) {
@@ -112,10 +71,85 @@ export default function RecordingControls({
     } finally {
       setUploading(false);
     }
-  };
+  }, [meetingId, onRecordingUploaded]);
+
+  const startRecording = useCallback(() => {
+    if (recorderRef.current?.state === "recording") return;
+
+    if (!streamToRecord) {
+      toast.error("No stream available to record");
+      onToggleRecording?.(false);
+      return;
+    }
+
+    try {
+      const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+        ? "video/webm;codecs=vp9"
+        : MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
+          ? "video/webm;codecs=vp8"
+          : "video/webm";
+
+      const recorder = new MediaRecorder(streamToRecord, { mimeType });
+      recorderRef.current = recorder;
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size > 0) chunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        chunksRef.current = [];
+
+        if (blob.size === 0) {
+          toast.error("Recording was empty — check mic/camera permissions");
+          return;
+        }
+
+        await uploadRecording(blob);
+      };
+
+      recorder.start(1000);
+      onRecordingStarted?.();
+      toast.success("Recording started");
+    } catch (error) {
+      console.error("Could not start meeting recording:", error);
+      toast.error("Could not start recording");
+      onToggleRecording?.(false);
+    }
+  }, [onRecordingStarted, onToggleRecording, streamToRecord, uploadRecording]);
+
+  const stopRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === "inactive") return;
+
+    try {
+      recorder.stop();
+      onRecordingStopped?.();
+      toast.success("Recording stopped — uploading…");
+    } catch (error) {
+      console.error("Could not stop meeting recording:", error);
+      toast.error("Could not stop recording");
+    }
+  }, [onRecordingStopped]);
+
+  // The meeting-room Record button owns the UI state; this instance owns the
+  // MediaRecorder and starts/stops when that state changes.
+  useEffect(() => {
+    if (!controlled) return;
+
+    if (recording) startRecording();
+    else stopRecording();
+  }, [controlled, recording, startRecording, stopRecording]);
 
   const handleToggle = () => {
     if (uploading) return;
+
+    if (controlled) {
+      onToggleRecording?.(!recording);
+      return;
+    }
+
     if (recording) {
       stopRecording();
       onToggleRecording?.(false);
@@ -125,21 +159,23 @@ export default function RecordingControls({
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (recorderRef.current && recorderRef.current.state === "recording") {
-        try { recorderRef.current.stop(); } catch {}
+  useEffect(() => () => {
+    if (recorderRef.current?.state === "recording") {
+      try {
+        recorderRef.current.stop();
+      } catch {
+        // The recorder may already have stopped while the route was changing.
       }
-    };
+    }
   }, []);
 
-  const formatTime = (s) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  const formatTime = (value) => {
+    const minutes = Math.floor(value / 60);
+    const remainingSeconds = value % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
   };
 
-  if (!enabled) return null;
+  if (!enabled || headless) return null;
 
   return (
     <div className="inline-flex items-center gap-2">
@@ -148,7 +184,9 @@ export default function RecordingControls({
         onClick={handleToggle}
         disabled={uploading}
         className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-          recording ? "bg-accent-rose text-white hover:bg-accent-rose/90" : "border border-line bg-card text-fg hover:bg-surface"
+          recording
+            ? "bg-accent-rose text-white hover:bg-accent-rose/90"
+            : "border border-line bg-card text-fg hover:bg-surface"
         } disabled:opacity-60`}
         title={recording ? "Stop recording" : "Start recording"}
       >

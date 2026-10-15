@@ -1,5 +1,5 @@
+// backend/controllers/task.controller.js
 import mongoose from "mongoose";
-
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import ApiError from "../utils/ApiError.js";
@@ -11,126 +11,331 @@ import User from "../models/user.model.js";
 import Meeting from "../models/meeting.model.js";
 import ActionItem from "../models/actionItem.model.js";
 
+import {
+    canManageTasksInTeam,
+    getTaskManageableTeamIds,
+    requireTaskManageInTeam,
+    requireProjectLinkedToTeam,
+    requireUserIsTeamMember,
+} from "../utils/taskAuth.util.js";
+
+import {
+    buildCloudinaryFolder,
+    uploadFileToCloudinary,
+    deleteFileFromCloudinary,
+} from "../utils/FileUplode.js";
+
 const validStatus = ["todo", "in-progress", "completed"];
 const validPriority = ["low", "medium", "high"];
+
+const MAX_ATTACHMENTS_PER_TASK = 5;
+const MAX_ATTACHMENTS_PER_REQUEST = 5;
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const idString = (value) => (value?._id || value)?.toString();
 
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
 const parseOptionalDate = (value, fieldName) => {
-    if (value === undefined || value === null || value === "") {
-        return undefined;
-    }
-
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
+    if (value === undefined || value === null || value === "") return undefined;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
         throw new ApiError(400, `Invalid ${fieldName}`);
     }
-
-    return date;
+    return d;
 };
 
-const ensureProjectAccess = async (user, projectId, requireMembership = true) => {
-    if (!projectId || !isValidObjectId(projectId)) {
-        throw new ApiError(400, "Invalid project id");
-    }
+/**
+ * Legacy-safe project access check.
+ * Access if user can manage tasks in ANY team linked to the project,
+ * OR is a member/owner of any linked team, OR project owner.
+ * (Project owner no longer gets automatic task MANAGEMENT; that is
+ * enforced separately in create/update/delete.)
+ */
+const canReadProjectTasks = async (user, project) => {
+    if (user.role === "admin") return true;
+    const userId = user._id.toString();
 
-    const project = await Project.findById(projectId);
+    const ownerId = idString(project.owner);
+    if (ownerId && ownerId === userId) return true;
 
-    if (!project) {
-        throw new ApiError(404, "Project not found");
-    }
+    const members = Array.isArray(project.members) ? project.members : [];
+    if (members.some((m) => idString(m) === userId)) return true;
 
-    const isAdmin = user.role === "admin";
-    const isOwner = project.owner.toString() === user._id.toString();
-    const isMember = project.members.some((memberId) => memberId.toString() === user._id.toString());
+    const teamIds = (project.teams || []).map((t) => t.toString());
+    if (teamIds.length === 0) return false;
 
-    if (!isAdmin && !isOwner && !isMember) {
-        throw new ApiError(403, "You do not have access to this project");
-    }
+    const accessible = await Team.findOne(
+        {
+            _id: { $in: teamIds },
+            $or: [{ owner: user._id }, { members: user._id }],
+        },
+        { _id: 1 }
+    ).lean();
 
-    if (requireMembership && !isAdmin && !isOwner && !isMember) {
-        throw new ApiError(403, "You do not have access to this project");
-    }
-
-    return project;
+    return !!accessible;
 };
 
-const ensureTeamAccess = async (user, teamId) => {
-    const team = await Team.findById(teamId);
+const populateTask = (query) =>
+    query
+        .populate("project", "name owner members teams status")
+        .populate("team", "name owner members")
+        .populate("createdBy", "fullName email avatar")
+        .populate("assignee", "fullName email avatar")
+        .populate("meeting", "title scheduledAt status")
+        .populate("actionItem", "title status")
+        .populate("attachments.uploadedBy", "fullName email avatar");
 
-    if (!team) {
-        throw new ApiError(404, "Team not found");
+/**
+ * Upload attachments to Cloudinary. Best-effort cleanup on failure.
+ */
+const uploadTaskAttachments = async (localFiles, folder, userId) => {
+    const uploaded = [];
+    try {
+        for (const f of localFiles) {
+            const result = await uploadFileToCloudinary(f.path, folder);
+            if (!result?.secure_url || !result?.public_id) {
+                throw new ApiError(500, "Attachment upload failed");
+            }
+            uploaded.push({
+                name: f.originalname || "file",
+                url: result.secure_url,
+                publicId: result.public_id,
+                resourceType: result.resource_type || "raw",
+                mimeType: f.mimetype || "",
+                size: f.size || 0,
+                uploadedBy: userId,
+                uploadedAt: new Date(),
+            });
+        }
+        return uploaded;
+    } catch (err) {
+        await Promise.all(
+            uploaded.map((u) =>
+                deleteFileFromCloudinary(u.publicId, u.resourceType).catch(
+                    (e) =>
+                        console.error(
+                            "Task attachment cleanup failed:",
+                            u.publicId,
+                            e?.message
+                        )
+                )
+            )
+        );
+        throw err;
     }
-
-    const isOwner = team.owner.toString() === user._id.toString();
-    const isMember = team.members.some((memberId) => memberId.toString() === user._id.toString());
-
-    if (user.role !== "admin" && !isOwner && !isMember) {
-        throw new ApiError(403, "You do not have access to this team");
-    }
-
-    return team;
 };
 
-const ensureMeetingAccess = async (user, meetingId) => {
-    const meeting = await Meeting.findById(meetingId);
+/* ============================================================
+   CREATE TASK
+   ------------------------------------------------------------
+   Authorization (per spec):
+     - admin
+     - team owner of task.team
+     - valid TeamTaskOwner of task.team (live membership)
+   Project Owner does NOT get automatic task management rights.
+   ============================================================ */
 
-    if (!meeting) {
-        throw new ApiError(404, "Meeting not found");
+const createTask = asyncHandler(async (req, res) => {
+    const {
+        title,
+        description,
+        project,
+        team,
+        assignee,
+        status,
+        priority,
+        dueDate,
+        meeting,
+        actionItem,
+    } = req.body;
+
+    if (!title || typeof title !== "string" || title.trim() === "") {
+        throw new ApiError(400, "Task title is required");
     }
 
-    const isHost = meeting.host.toString() === user._id.toString();
-    const isParticipant = meeting.participants.some((memberId) => memberId.toString() === user._id.toString());
-
-    if (user.role !== "admin" && !isHost && !isParticipant) {
-        throw new ApiError(403, "You do not have access to this meeting");
+    if (!project || !isValidObjectId(project)) {
+        throw new ApiError(400, "Valid project id is required");
+    }
+    if (!team || !isValidObjectId(team)) {
+        throw new ApiError(400, "Valid team id is required");
     }
 
-    return meeting;
-};
+    const projectDoc = await Project.findById(project);
+    if (!projectDoc) throw new ApiError(404, "Project not found");
 
-const ensureTaskActionItem = async (user, actionItemId, projectId, meetingId) => {
-    const actionItem = await ActionItem.findById(actionItemId);
+    const teamDoc = await Team.findById(team);
+    if (!teamDoc) throw new ApiError(404, "Team not found");
 
-    if (!actionItem) {
-        throw new ApiError(404, "Action item not found");
+    // Project must be linked to the team
+    await requireProjectLinkedToTeam(projectDoc, team);
+
+    // Authorization: only team owner / Task Owner / admin
+    await requireTaskManageInTeam(req.user, team);
+
+    if (assignee !== undefined && assignee !== null && assignee !== "") {
+        await requireUserIsTeamMember(teamDoc, assignee);
     }
 
-    if (actionItem.project && actionItem.project.toString() !== projectId.toString()) {
-        throw new ApiError(400, "Action item belongs to a different project");
+    if (meeting !== undefined && meeting !== null && meeting !== "") {
+        if (!isValidObjectId(meeting)) {
+            throw new ApiError(400, "Invalid meeting id");
+        }
+        const m = await Meeting.findById(meeting);
+        if (!m) throw new ApiError(404, "Meeting not found");
     }
 
-    if (actionItem.meeting) {
-        await ensureMeetingAccess(user, actionItem.meeting.toString());
+    if (actionItem !== undefined && actionItem !== null && actionItem !== "") {
+        if (!isValidObjectId(actionItem)) {
+            throw new ApiError(400, "Invalid actionItem id");
+        }
+        const ai = await ActionItem.findById(actionItem);
+        if (!ai) throw new ApiError(404, "Action item not found");
+    }
 
-        if (meetingId && actionItem.meeting.toString() !== meetingId.toString()) {
-            throw new ApiError(400, "Action item belongs to a different meeting");
+    if (status !== undefined && !validStatus.includes(status)) {
+        throw new ApiError(400, "Invalid task status");
+    }
+    if (priority !== undefined && !validPriority.includes(priority)) {
+        throw new ApiError(400, "Invalid task priority");
+    }
+
+    const parsedDueDate = parseOptionalDate(dueDate, "dueDate");
+
+    const task = await Task.create({
+        title: title.trim(),
+        description: description ? String(description).trim() : "",
+        project: projectDoc._id,
+        team: teamDoc._id,
+        createdBy: req.user._id,
+        assignee: assignee || null,
+        status: status || "todo",
+        priority: priority || "medium",
+        dueDate: parsedDueDate || null,
+        completedAt: status === "completed" ? new Date() : null,
+        meeting: meeting || null,
+        actionItem: actionItem || null,
+        attachments: [],
+    });
+
+    // Attachments
+    const localFiles = req.files || [];
+    if (localFiles.length > MAX_ATTACHMENTS_PER_REQUEST) {
+        await task.deleteOne().catch(() => {});
+        throw new ApiError(
+            400,
+            `Maximum ${MAX_ATTACHMENTS_PER_REQUEST} attachments per request`
+        );
+    }
+
+    if (localFiles.length > 0) {
+        const folder = buildCloudinaryFolder({
+            entityType: "tasks",
+            userId: req.user._id.toString(),
+            projectId: projectDoc._id.toString(),
+            meetingId: task._id.toString(), // reuse slot for task id
+        });
+
+        try {
+            const uploaded = await uploadTaskAttachments(
+                localFiles,
+                folder,
+                req.user._id
+            );
+            task.attachments = uploaded;
+            await task.save();
+        } catch (err) {
+            console.error("createTask: attachment upload failed", err);
+            await task.deleteOne().catch((delErr) =>
+                console.error(
+                    "createTask: rollback failed, orphan task:",
+                    task._id,
+                    delErr?.message
+                )
+            );
+            throw new ApiError(
+                500,
+                "Attachment upload failed; task was not created"
+            );
         }
     }
 
-    return actionItem;
-};
+    const populatedTask = await populateTask(Task.findById(task._id));
+
+    return res
+        .status(201)
+        .json(new ApiResponse(201, populatedTask, "Task created successfully"));
+});
+
+/* ============================================================
+   GET TASKS (scoped)
+   ============================================================ */
 
 const normalizeTaskFilters = async (user, query = {}) => {
     const filter = {};
-    const { project, status, priority, assignee } = query;
+    const { project, team, status, priority, assignee } = query;
 
+    // Direct team filter
+    if (team) {
+        if (!isValidObjectId(team)) {
+            throw new ApiError(400, "Invalid team id");
+        }
+        const teamDoc = await Team.findById(team);
+        if (!teamDoc) throw new ApiError(404, "Team not found");
+
+        const isMember = (teamDoc.members || []).some(
+            (m) => m.toString() === user._id.toString()
+        );
+        const isOwner = teamDoc.owner.toString() === user._id.toString();
+
+        if (user.role !== "admin" && !isMember && !isOwner) {
+            throw new ApiError(403, "No access to this team");
+        }
+        filter.team = team;
+    }
+
+    // Direct project filter (must be accessible)
     if (project) {
         if (!isValidObjectId(project)) {
             throw new ApiError(400, "Invalid project id");
         }
+        const projectDoc = await Project.findById(project);
+        if (!projectDoc) throw new ApiError(404, "Project not found");
 
-        const projectDoc = await ensureProjectAccess(user, project);
+        const ok = await canReadProjectTasks(user, projectDoc);
+        if (!ok) throw new ApiError(403, "No access to this project");
+
         filter.project = projectDoc._id;
-    } else if (user.role !== "admin") {
-        const accessibleProjects = await Project.find(
+    }
+
+    // If no direct project/team filter → scope by accessible teams+projects
+    if (!project && !team && user.role !== "admin") {
+        const accessibleTeams = await Team.find(
             { $or: [{ owner: user._id }, { members: user._id }] },
             { _id: 1 }
-        );
+        ).lean();
+        const teamIds = accessibleTeams.map((t) => t._id);
 
-        filter.project = { $in: accessibleProjects.map((item) => item._id) };
+        const accessibleProjects = await Project.find(
+            {
+                $or: [
+                    { owner: user._id },
+                    { members: user._id },
+                    ...(teamIds.length ? [{ teams: { $in: teamIds } }] : []),
+                ],
+            },
+            { _id: 1 }
+        );
+        const projectIds = accessibleProjects.map((p) => p._id);
+
+        filter.$or = [
+            { project: { $in: projectIds } },
+            { team: { $in: teamIds } },
+            { assignee: user._id },
+            { createdBy: user._id },
+        ];
     }
 
     if (status) {
@@ -157,144 +362,21 @@ const normalizeTaskFilters = async (user, query = {}) => {
     return filter;
 };
 
-const getTaskAccessContext = async (user, task) => {
-    const project = await Project.findById(task.project?._id || task.project);
-
-    if (!project) {
-        throw new ApiError(404, "Project not found");
-    }
-
-    const isAdmin = user.role === "admin";
-    const isProjectOwner = project.owner.toString() === user._id.toString();
-    const isProjectMember = project.members.some((memberId) => memberId.toString() === user._id.toString());
-    const isCreator = idString(task.createdBy) === user._id.toString();
-    const isAssignee = task.assignee && idString(task.assignee) === user._id.toString();
-
-    if (!isAdmin && !isProjectOwner && !isProjectMember && !isCreator && !isAssignee) {
-        throw new ApiError(403, "You do not have access to this task");
-    }
-
-    return { project, isAdmin, isProjectOwner, isProjectMember, isCreator, isAssignee };
-};
-
-const createTask = asyncHandler(async (req, res) => {
-    const {
-        title,
-        description,
-        project,
-        team,
-        assignee,
-        status,
-        priority,
-        dueDate,
-        meeting,
-        actionItem,
-    } = req.body;
-
-    if (!title || typeof title !== "string" || title.trim() === "") {
-        throw new ApiError(400, "Task title is required");
-    }
-
-    if (!project || !isValidObjectId(project)) {
-        throw new ApiError(400, "Valid project id is required");
-    }
-
-    const projectDoc = await ensureProjectAccess(req.user, project);
-
-    if (team !== undefined && team !== null && team !== "") {
-        if (!isValidObjectId(team)) {
-            throw new ApiError(400, "Invalid team id");
-        }
-
-        await ensureTeamAccess(req.user, team);
-    }
-
-    if (assignee !== undefined && assignee !== null && assignee !== "") {
-        if (!isValidObjectId(assignee)) {
-            throw new ApiError(400, "Invalid assignee id");
-        }
-
-        const assigneeUser = await User.findById(assignee);
-        if (!assigneeUser || !assigneeUser.isActive) {
-            throw new ApiError(404, "Assignee not found");
-        }
-
-        const isAssigneeProjectMember = projectDoc.owner.toString() === assigneeUser._id.toString()
-            || projectDoc.members.some((memberId) => memberId.toString() === assigneeUser._id.toString());
-
-        if (!isAssigneeProjectMember && req.user.role !== "admin") {
-            throw new ApiError(403, "Assignee must belong to the project");
-        }
-    }
-
-    if (meeting !== undefined && meeting !== null && meeting !== "") {
-        if (!isValidObjectId(meeting)) {
-            throw new ApiError(400, "Invalid meeting id");
-        }
-        await ensureMeetingAccess(req.user, meeting);
-    }
-
-    if (actionItem !== undefined && actionItem !== null && actionItem !== "") {
-        if (!isValidObjectId(actionItem)) {
-            throw new ApiError(400, "Invalid actionItem id");
-        }
-        await ensureTaskActionItem(req.user, actionItem, projectDoc._id, meeting);
-    }
-
-    if (status !== undefined && !validStatus.includes(status)) {
-        throw new ApiError(400, "Invalid task status");
-    }
-
-    if (priority !== undefined && !validPriority.includes(priority)) {
-        throw new ApiError(400, "Invalid task priority");
-    }
-
-    const parsedDueDate = parseOptionalDate(dueDate, "dueDate");
-
-    const task = await Task.create({
-        title: title.trim(),
-        description: description ? description.trim() : "",
-        project: projectDoc._id,
-        team: team || null,
-        createdBy: req.user._id,
-        assignee: assignee || null,
-        status: status || "todo",
-        priority: priority || "medium",
-        dueDate: parsedDueDate || null,
-        completedAt: status === "completed" ? new Date() : null,
-        meeting: meeting || null,
-        actionItem: actionItem || null,
-    });
-
-    const populatedTask = await Task.findById(task._id)
-        .populate("project", "name owner members status")
-        .populate("team", "name owner")
-        .populate("createdBy", "fullName email avatar")
-        .populate("assignee", "fullName email avatar")
-        .populate("meeting", "title scheduledAt status")
-        .populate("actionItem", "title status");
-
-    return res
-        .status(201)
-        .json(new ApiResponse(201, populatedTask, "Task created successfully"));
-});
-
 const getTasks = asyncHandler(async (req, res) => {
     const filter = await normalizeTaskFilters(req.user, req.query);
 
-    const tasks = await Task.find(filter)
-        .populate("project", "name owner members status")
-        .populate("team", "name owner")
-        .populate("createdBy", "fullName email avatar")
-        .populate("assignee", "fullName email avatar")
-        .populate("meeting", "title scheduledAt status")
-        .populate("actionItem", "title status")
-        .sort({ updatedAt: -1 });
+    const tasks = await populateTask(
+        Task.find(filter).sort({ updatedAt: -1 })
+    );
 
     return res
         .status(200)
         .json(new ApiResponse(200, tasks, "Tasks fetched successfully"));
 });
+
+/* ============================================================
+   GET TASK BY ID
+   ============================================================ */
 
 const getTaskById = asyncHandler(async (req, res) => {
     const { taskId } = req.params;
@@ -303,24 +385,52 @@ const getTaskById = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Invalid task id");
     }
 
-    const task = await Task.findById(taskId)
-        .populate("project", "name owner members status")
-        .populate("team", "name owner")
-        .populate("createdBy", "fullName email avatar")
-        .populate("assignee", "fullName email avatar")
-        .populate("meeting", "title scheduledAt status")
-        .populate("actionItem", "title status");
+    const task = await populateTask(Task.findById(taskId));
+    if (!task) throw new ApiError(404, "Task not found");
 
-    if (!task) {
-        throw new ApiError(404, "Task not found");
+    // Access: admin / team owner / task owner / assignee / creator / team member / project member
+    if (req.user.role !== "admin") {
+        const userId = req.user._id.toString();
+        const assigneeId = idString(task.assignee);
+        const creatorId = idString(task.createdBy);
+
+        let allowed = assigneeId === userId || creatorId === userId;
+
+        if (!allowed && task.project) {
+            const projectDoc = await Project.findById(task.project._id || task.project);
+            if (projectDoc) {
+                allowed = await canReadProjectTasks(req.user, projectDoc);
+            }
+        }
+
+        if (!allowed && task.team) {
+            const teamDoc = await Team.findById(task.team._id || task.team);
+            if (teamDoc) {
+                allowed =
+                    teamDoc.owner.toString() === userId ||
+                    (teamDoc.members || []).some(
+                        (m) => m.toString() === userId
+                    );
+            }
+        }
+
+        if (!allowed) {
+            throw new ApiError(403, "You do not have access to this task");
+        }
     }
-
-    await getTaskAccessContext(req.user, task);
 
     return res
         .status(200)
         .json(new ApiResponse(200, task, "Task fetched successfully"));
 });
+
+/* ============================================================
+   UPDATE TASK
+   ------------------------------------------------------------
+   Manager (team owner / task owner / admin) → full update
+   Assignee (own task) → can only update status (with allowed transitions)
+   Others → forbidden
+   ============================================================ */
 
 const updateTask = asyncHandler(async (req, res) => {
     const { taskId } = req.params;
@@ -330,43 +440,66 @@ const updateTask = asyncHandler(async (req, res) => {
     }
 
     const task = await Task.findById(taskId);
+    if (!task) throw new ApiError(404, "Task not found");
 
-    if (!task) {
-        throw new ApiError(404, "Task not found");
-    }
+    const userId = req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
 
-    const { project, team, assignee, status, priority, dueDate, description, meeting, actionItem, title } = req.body;
-    const access = await getTaskAccessContext(req.user, task);
+    const isManager =
+        task.team && (await canManageTasksInTeam(req.user, task.team));
+    const isAssignee = idString(task.assignee) === userId;
+    const isCreator = idString(task.createdBy) === userId;
 
-    if (
-        !access.isAdmin &&
-        !access.isProjectOwner &&
-        !access.isCreator &&
-        !(access.isAssignee && Object.keys(req.body).every((key) => ["status", "priority", "dueDate", "description"].includes(key)))
-    ) {
+    // Determine if allowed at all
+    if (!isAdmin && !isManager && !isAssignee && !isCreator) {
         throw new ApiError(403, "You are not allowed to update this task");
     }
 
-    if (project !== undefined && project !== null && project !== "" && project.toString() !== task.project.toString()) {
+    // Assignee-only restriction (not manager)
+    if (!isAdmin && !isManager && !isCreator) {
+        // Assignee-only → status only
+        const allowedKeys = ["status"];
+        const provided = Object.keys(req.body);
+        const bad = provided.filter((k) => !allowedKeys.includes(k));
+        if (bad.length > 0) {
+            throw new ApiError(
+                403,
+                "You can only update the status of your own task"
+            );
+        }
+    }
+
+    // Reject unauthorized fields
+    if (req.body.createdBy !== undefined) {
+        throw new ApiError(403, "createdBy cannot be changed");
+    }
+    if (req.body.project !== undefined && idString(req.body.project) !== idString(task.project)) {
         throw new ApiError(403, "Task project cannot be changed");
     }
 
-    if (req.body.createdBy !== undefined || req.body.project !== undefined && req.body.project !== task.project.toString()) {
-        throw new ApiError(403, "Unauthorized task field update");
-    }
+    const {
+        title,
+        description,
+        status,
+        priority,
+        dueDate,
+        assignee,
+        team: newTeam,
+        meeting,
+        actionItem,
+    } = req.body;
 
-    if (team !== undefined && team !== null && team !== "") {
-        if (!isValidObjectId(team)) {
+    // Managers can only change team to another team they can manage
+    if (newTeam !== undefined && newTeam !== null && newTeam !== "") {
+        if (!isValidObjectId(newTeam)) {
             throw new ApiError(400, "Invalid team id");
         }
-
-        const teamDoc = await ensureTeamAccess(req.user, team);
-
+        const teamDoc = await Team.findById(newTeam);
+        if (!teamDoc) throw new ApiError(404, "Team not found");
+        await requireTaskManageInTeam(req.user, newTeam);
+        const projectDoc = await Project.findById(task.project);
+        await requireProjectLinkedToTeam(projectDoc, newTeam);
         task.team = teamDoc._id;
-    }
-
-    if (team === null || team === "") {
-        task.team = null;
     }
 
     if (assignee !== undefined) {
@@ -376,21 +509,9 @@ const updateTask = asyncHandler(async (req, res) => {
             if (!isValidObjectId(assignee)) {
                 throw new ApiError(400, "Invalid assignee id");
             }
-
-            const assigneeUser = await User.findById(assignee);
-            if (!assigneeUser || !assigneeUser.isActive) {
-                throw new ApiError(404, "Assignee not found");
-            }
-
-            const projectDoc = await Project.findById(task.project);
-            const isAssigneeProjectMember = projectDoc.owner.toString() === assigneeUser._id.toString()
-                || projectDoc.members.some((memberId) => memberId.toString() === assigneeUser._id.toString());
-
-            if (!isAssigneeProjectMember && req.user.role !== "admin") {
-                throw new ApiError(403, "Assignee must belong to the project");
-            }
-
-            task.assignee = assigneeUser._id;
+            const teamDoc = await Team.findById(task.team);
+            await requireUserIsTeamMember(teamDoc, assignee);
+            task.assignee = assignee;
         }
     }
 
@@ -399,7 +520,8 @@ const updateTask = asyncHandler(async (req, res) => {
             throw new ApiError(400, "Invalid task status");
         }
         task.status = status;
-        task.completedAt = status === "completed" ? (task.completedAt || new Date()) : null;
+        task.completedAt =
+            status === "completed" ? task.completedAt || new Date() : null;
     }
 
     if (priority !== undefined) {
@@ -414,7 +536,7 @@ const updateTask = asyncHandler(async (req, res) => {
     }
 
     if (description !== undefined) {
-        task.description = description ? description.trim() : "";
+        task.description = description ? String(description).trim() : "";
     }
 
     if (title !== undefined) {
@@ -425,51 +547,26 @@ const updateTask = asyncHandler(async (req, res) => {
     }
 
     if (meeting !== undefined) {
-        if (meeting === null || meeting === "") {
-            task.meeting = null;
-        } else {
-            if (!isValidObjectId(meeting)) {
-                throw new ApiError(400, "Invalid meeting id");
-            }
-            await ensureMeetingAccess(req.user, meeting);
-            task.meeting = meeting;
-        }
+        task.meeting = meeting || null;
     }
 
     if (actionItem !== undefined) {
-        if (actionItem === null || actionItem === "") {
-            task.actionItem = null;
-        } else {
-            if (!isValidObjectId(actionItem)) {
-                throw new ApiError(400, "Invalid actionItem id");
-            }
-            await ensureTaskActionItem(req.user, actionItem, task.project, meeting || task.meeting);
-            task.actionItem = actionItem;
-        }
-    }
-
-    if (task.meeting) {
-        await ensureMeetingAccess(req.user, task.meeting.toString());
-    }
-
-    if (task.actionItem) {
-        await ensureTaskActionItem(req.user, task.actionItem.toString(), task.project, task.meeting);
+        task.actionItem = actionItem || null;
     }
 
     await task.save();
 
-    const updatedTask = await Task.findById(task._id)
-        .populate("project", "name owner members status")
-        .populate("team", "name owner")
-        .populate("createdBy", "fullName email avatar")
-        .populate("assignee", "fullName email avatar")
-        .populate("meeting", "title scheduledAt status")
-        .populate("actionItem", "title status");
+    const updatedTask = await populateTask(Task.findById(task._id));
 
     return res
         .status(200)
         .json(new ApiResponse(200, updatedTask, "Task updated successfully"));
 });
+
+/* ============================================================
+   DELETE TASK
+   Manager-only (admin / team owner / task owner) OR creator
+   ============================================================ */
 
 const deleteTask = asyncHandler(async (req, res) => {
     const { taskId } = req.params;
@@ -479,22 +576,495 @@ const deleteTask = asyncHandler(async (req, res) => {
     }
 
     const task = await Task.findById(taskId);
+    if (!task) throw new ApiError(404, "Task not found");
 
-    if (!task) {
-        throw new ApiError(404, "Task not found");
+    const userId = req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
+    const isManager =
+        task.team && (await canManageTasksInTeam(req.user, task.team));
+    const isCreator = idString(task.createdBy) === userId;
+
+    if (!isAdmin && !isManager && !isCreator) {
+        throw new ApiError(403, "You are not allowed to delete this task");
     }
 
-    const access = await getTaskAccessContext(req.user, task);
+    // Best-effort attachment cleanup
+    const failed = [];
+    if (Array.isArray(task.attachments) && task.attachments.length) {
+        const results = await Promise.allSettled(
+            task.attachments.map((a) =>
+                deleteFileFromCloudinary(a.publicId, a.resourceType)
+            )
+        );
+        results.forEach((r, i) => {
+            if (r.status === "rejected") {
+                failed.push({
+                    publicId: task.attachments[i].publicId,
+                    reason: r.reason?.message || "unknown",
+                });
+            }
+        });
+    }
 
-    if (!access.isAdmin && !access.isProjectOwner && !access.isCreator) {
-        throw new ApiError(403, "You are not allowed to delete this task");
+    if (failed.length) {
+        console.error("deleteTask: orphaned task attachments", failed);
     }
 
     await task.deleteOne();
 
     return res
         .status(200)
-        .json(new ApiResponse(200, {}, "Task deleted successfully"));
+        .json(
+            new ApiResponse(
+                200,
+                failed.length ? { orphanedAssets: failed } : {},
+                "Task deleted successfully"
+            )
+        );
+});
+
+/* ============================================================
+   ADD ATTACHMENTS
+   ============================================================ */
+
+const addTaskAttachments = asyncHandler(async (req, res) => {
+    const { taskId } = req.params;
+
+    if (!isValidObjectId(taskId)) {
+        throw new ApiError(400, "Invalid task id");
+    }
+
+    const task = await Task.findById(taskId);
+    if (!task) throw new ApiError(404, "Task not found");
+
+    const isAdmin = req.user.role === "admin";
+    const isManager =
+        task.team && (await canManageTasksInTeam(req.user, task.team));
+    const isCreator = idString(task.createdBy) === req.user._id.toString();
+
+    if (!isAdmin && !isManager && !isCreator) {
+        throw new ApiError(
+            403,
+            "You are not authorized to add attachments to this task"
+        );
+    }
+
+    const files = req.files || [];
+    if (files.length === 0) {
+        throw new ApiError(400, "No files provided");
+    }
+    if (files.length > MAX_ATTACHMENTS_PER_REQUEST) {
+        throw new ApiError(
+            400,
+            `Maximum ${MAX_ATTACHMENTS_PER_REQUEST} attachments per request`
+        );
+    }
+    const current = (task.attachments || []).length;
+    if (current + files.length > MAX_ATTACHMENTS_PER_TASK) {
+        throw new ApiError(
+            400,
+            `Task can have at most ${MAX_ATTACHMENTS_PER_TASK} attachments`
+        );
+    }
+
+    const folder = buildCloudinaryFolder({
+        entityType: "tasks",
+        userId: req.user._id.toString(),
+        projectId: task.project.toString(),
+        meetingId: task._id.toString(),
+    });
+
+    const uploaded = await uploadTaskAttachments(
+        files,
+        folder,
+        req.user._id
+    );
+
+    task.attachments = [...(task.attachments || []), ...uploaded];
+
+    try {
+        await task.save();
+    } catch (err) {
+        console.error("addTaskAttachments: save failed, cleaning up", err);
+        await Promise.all(
+            uploaded.map((u) =>
+                deleteFileFromCloudinary(u.publicId, u.resourceType).catch(
+                    (e) =>
+                        console.error(
+                            "cleanup failed",
+                            u.publicId,
+                            e?.message
+                        )
+                )
+            )
+        );
+        throw new ApiError(500, "Could not save task attachments");
+    }
+
+    const populated = await populateTask(Task.findById(task._id));
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(200, populated, "Attachments uploaded successfully")
+        );
+});
+
+/* ============================================================
+   DELETE ATTACHMENT
+   ============================================================ */
+
+const deleteTaskAttachment = asyncHandler(async (req, res) => {
+    const { taskId, attachmentId } = req.params;
+
+    if (!isValidObjectId(taskId) || !isValidObjectId(attachmentId)) {
+        throw new ApiError(400, "Invalid task or attachment id");
+    }
+
+    const task = await Task.findById(taskId);
+    if (!task) throw new ApiError(404, "Task not found");
+
+    const isAdmin = req.user.role === "admin";
+    const isManager =
+        task.team && (await canManageTasksInTeam(req.user, task.team));
+    const isCreator = idString(task.createdBy) === req.user._id.toString();
+
+    if (!isAdmin && !isManager && !isCreator) {
+        throw new ApiError(
+            403,
+            "You are not authorized to delete attachments"
+        );
+    }
+
+    const list = task.attachments || [];
+    const target = list.find((a) => a._id.toString() === attachmentId);
+    if (!target) throw new ApiError(404, "Attachment not found");
+
+    try {
+        await deleteFileFromCloudinary(target.publicId, target.resourceType);
+    } catch (err) {
+        console.error("deleteTaskAttachment: cloudinary failed", err);
+        throw new ApiError(
+            500,
+            "Could not delete attachment from storage"
+        );
+    }
+
+    task.attachments = list.filter(
+        (a) => a._id.toString() !== attachmentId
+    );
+
+    try {
+        await task.save();
+    } catch (err) {
+        console.error(
+            "deleteTaskAttachment: DB save failed after Cloudinary delete",
+            err
+        );
+        throw new ApiError(
+            500,
+            "Storage deleted but DB update failed. Contact support."
+        );
+    }
+
+    const populated = await populateTask(Task.findById(task._id));
+    return res
+        .status(200)
+        .json(new ApiResponse(200, populated, "Attachment deleted"));
+});
+
+/* ============================================================
+   TASK STATISTICS (Dashboard)
+   ============================================================ */
+
+const getTaskStats = asyncHandler(async (req, res) => {
+    const { team: teamFilter, project: projectFilter } = req.query;
+
+    const isAdmin = req.user.role === "admin";
+    const userId = req.user._id;
+
+    // Accessible teams
+    const accessibleTeams = isAdmin
+        ? await Team.find({}, { _id: 1 }).lean()
+        : await Team.find(
+            { $or: [{ owner: userId }, { members: userId }] },
+            { _id: 1 }
+        ).lean();
+    const accessibleTeamIds = accessibleTeams.map((t) => t._id);
+
+    // Accessible projects
+    const accessibleProjects = isAdmin
+        ? await Project.find({}, { _id: 1 }).lean()
+        : await Project.find(
+            {
+                $or: [
+                    { owner: userId },
+                    { members: userId },
+                    ...(accessibleTeamIds.length
+                        ? [{ teams: { $in: accessibleTeamIds } }]
+                        : []),
+                ],
+            },
+            { _id: 1 }
+        ).lean();
+    const accessibleProjectIds = accessibleProjects.map((p) => p._id);
+
+    // Base filter
+    const base = isAdmin
+        ? {}
+        : {
+            $or: [
+                { project: { $in: accessibleProjectIds } },
+                { team: { $in: accessibleTeamIds } },
+                { assignee: userId },
+                { createdBy: userId },
+            ],
+        };
+
+    if (teamFilter && isValidObjectId(teamFilter)) {
+        base.team = teamFilter;
+    }
+    if (projectFilter && isValidObjectId(projectFilter)) {
+        base.project = projectFilter;
+    }
+
+    const now = new Date();
+
+    const [
+        total,
+        todo,
+        inProgress,
+        completed,
+        overdue,
+        upcomingDeadlines,
+        projectProgress,
+        teamWorkload,
+    ] = await Promise.all([
+        Task.countDocuments(base),
+        Task.countDocuments({ ...base, status: "todo" }),
+        Task.countDocuments({ ...base, status: "in-progress" }),
+        Task.countDocuments({ ...base, status: "completed" }),
+        Task.countDocuments({
+            ...base,
+            status: { $ne: "completed" },
+            dueDate: { $lt: now },
+        }),
+        Task.find({
+            ...base,
+            status: { $ne: "completed" },
+            dueDate: { $gte: now },
+        })
+            .populate("project", "name")
+            .populate("team", "name")
+            .populate("assignee", "fullName avatar")
+            .sort({ dueDate: 1 })
+            .limit(5)
+            .lean(),
+        // Per-project progress (aggregate)
+        Task.aggregate([
+            {
+                $match: isAdmin
+                    ? {}
+                    : { project: { $in: accessibleProjectIds } },
+            },
+            {
+                $group: {
+                    _id: "$project",
+                    total: { $sum: 1 },
+                    completed: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "completed"] }, 1, 0],
+                        },
+                    },
+                },
+            },
+            {
+                $lookup: {
+                    from: "projects",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "projectInfo",
+                },
+            },
+            { $unwind: { path: "$projectInfo", preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 0,
+                    projectId: "$_id",
+                    name: { $ifNull: ["$projectInfo.name", "Unknown project"] },
+                    total: 1,
+                    completed: 1,
+                },
+            },
+            { $sort: { total: -1 } },
+            { $limit: 10 },
+        ]),
+        // Team workload
+        Task.aggregate([
+            {
+                $match: isAdmin
+                    ? { team: { $ne: null } }
+                    : { team: { $in: accessibleTeamIds } },
+            },
+            { $match: { team: { $ne: null } } },
+            {
+                $group: {
+                    _id: "$team",
+                    total: { $sum: 1 },
+                    completed: {
+                        $sum: {
+                            $cond: [{ $eq: ["$status", "completed"] }, 1, 0],
+                        },
+                    },
+                },
+            },
+            {
+                $lookup: {
+                    from: "teams",
+                    localField: "_id",
+                    foreignField: "_id",
+                    as: "teamInfo",
+                },
+            },
+            { $unwind: { path: "$teamInfo", preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 0,
+                    teamId: "$_id",
+                    name: { $ifNull: ["$teamInfo.name", "Unknown team"] },
+                    total: 1,
+                    completed: 1,
+                },
+            },
+            { $sort: { total: -1 } },
+            { $limit: 10 },
+        ]),
+    ]);
+
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            {
+                totals: { total, todo, inProgress, completed, overdue },
+                completionRate,
+                upcomingDeadlines,
+                projectProgress: projectProgress.map((p) => ({
+                    ...p,
+                    completionRate:
+                        p.total > 0
+                            ? Math.round((p.completed / p.total) * 100)
+                            : 0,
+                })),
+                teamWorkload: teamWorkload.map((t) => ({
+                    ...t,
+                    completionRate:
+                        t.total > 0
+                            ? Math.round((t.completed / t.total) * 100)
+                            : 0,
+                })),
+            },
+            "Task statistics fetched successfully"
+        )
+    );
+});
+
+/* ============================================================
+   ELIGIBLE ENDPOINTS (for Create Task form)
+   ============================================================ */
+
+/**
+ * GET /tasks/eligible-teams
+ * Returns teams where user can manage tasks.
+ */
+const getEligibleTeams = asyncHandler(async (req, res) => {
+    const teamIds = await getTaskManageableTeamIds(req.user);
+    if (teamIds.length === 0) {
+        return res
+            .status(200)
+            .json(new ApiResponse(200, [], "No eligible teams"));
+    }
+    const teams = await Team.find({ _id: { $in: teamIds } })
+        .populate("owner", "fullName email avatar")
+        .populate("members", "fullName email avatar")
+        .sort({ name: 1 })
+        .lean();
+    return res
+        .status(200)
+        .json(new ApiResponse(200, teams, "Eligible teams fetched"));
+});
+
+/**
+ * GET /tasks/eligible-projects?team=teamId
+ * Returns projects linked to that team.
+ */
+const getEligibleProjects = asyncHandler(async (req, res) => {
+    const { team: teamId } = req.query;
+    if (!teamId || !isValidObjectId(teamId)) {
+        throw new ApiError(400, "Valid team id is required");
+    }
+
+    const team = await Team.findById(teamId);
+    if (!team) throw new ApiError(404, "Team not found");
+
+    const isAdmin = req.user.role === "admin";
+    const userId = req.user._id.toString();
+    const isOwner = team.owner.toString() === userId;
+    const isMember = (team.members || []).some(
+        (m) => m.toString() === userId
+    );
+
+    if (!isAdmin && !isOwner && !isMember) {
+        throw new ApiError(403, "No access to this team");
+    }
+
+    const projects = await Project.find({ teams: teamId })
+        .populate("owner", "fullName email avatar")
+        .sort({ name: 1 })
+        .lean();
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, projects, "Eligible projects fetched"));
+});
+
+/**
+ * GET /tasks/eligible-members?team=teamId
+ * Returns current members of that team.
+ */
+const getEligibleMembers = asyncHandler(async (req, res) => {
+    const { team: teamId } = req.query;
+    if (!teamId || !isValidObjectId(teamId)) {
+        throw new ApiError(400, "Valid team id is required");
+    }
+
+    const team = await Team.findById(teamId)
+        .populate("owner", "fullName email avatar")
+        .populate("members", "fullName email avatar");
+    if (!team) throw new ApiError(404, "Team not found");
+
+    const isAdmin = req.user.role === "admin";
+    const userId = req.user._id.toString();
+    const isOwner = team.owner._id.toString() === userId;
+    const isMember = (team.members || []).some(
+        (m) => m._id.toString() === userId
+    );
+
+    if (!isAdmin && !isOwner && !isMember) {
+        throw new ApiError(403, "No access to this team");
+    }
+
+    // Union of owner + members, deduped
+    const map = new Map();
+    if (team.owner) map.set(team.owner._id.toString(), team.owner);
+    for (const m of team.members || []) {
+        map.set(m._id.toString(), m);
+    }
+    const members = Array.from(map.values());
+
+    return res
+        .status(200)
+        .json(new ApiResponse(200, members, "Eligible members fetched"));
 });
 
 export {
@@ -503,4 +1073,10 @@ export {
     getTaskById,
     updateTask,
     deleteTask,
+    addTaskAttachments,
+    deleteTaskAttachment,
+    getTaskStats,
+    getEligibleTeams,
+    getEligibleProjects,
+    getEligibleMembers,
 };

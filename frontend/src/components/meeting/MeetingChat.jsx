@@ -1,13 +1,18 @@
+// frontend/src/components/meeting/MeetingChat.jsx
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, MessageSquare } from "lucide-react";
 
-export default function MeetingChat({ messages = [], currentUserId = null, onSend, disabled = false }) {
+export default function MeetingChat({
+  messages = [],
+  currentUserId = null,
+  onSend,
+  disabled = false,
+}) {
   const [draft, setDraft] = useState("");
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const scrollRef = useRef(null);
   const scrollThrottleRef = useRef(0);
 
-  // ✅ Only auto-scroll when user is at bottom
   useEffect(() => {
     if (userScrolledUp) return;
     const el = scrollRef.current;
@@ -15,7 +20,6 @@ export default function MeetingChat({ messages = [], currentUserId = null, onSen
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages.length, userScrolledUp]);
 
-  // ✅ Throttled scroll detection
   const handleScroll = useCallback(() => {
     const now = Date.now();
     if (now - scrollThrottleRef.current < 100) return;
@@ -37,14 +41,21 @@ export default function MeetingChat({ messages = [], currentUserId = null, onSen
 
   const formatTime = (iso) => {
     if (!iso) return "";
-    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return new Date(iso).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
   };
 
   const getInitial = (name) => (name || "U")[0]?.toUpperCase() || "U";
 
   return (
     <div className="flex h-full flex-col">
-      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-3 py-3 space-y-3"
+      >
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-surface">
@@ -55,27 +66,51 @@ export default function MeetingChat({ messages = [], currentUserId = null, onSen
           </div>
         ) : (
           messages.map((msg) => {
-            const isMe = msg.userId === currentUserId;
+            // ✅ FIX: Handle both formats — backend sends {sender, message} or {userId, text}
+            const senderId = msg.userId || msg.sender?._id;
+            const senderName = msg.fullName || msg.sender?.fullName || "User";
+            const senderAvatar = msg.avatar || msg.sender?.avatar || null;
+            const text = msg.text || msg.message || "";
+
+            const isMe = senderId === currentUserId;
+
+            if (!text.trim()) return null;
+
             return (
-              <div key={msg.id} className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : ""}`}>
-                {msg.avatar ? (
-                  <img src={msg.avatar} alt={msg.fullName} className="h-7 w-7 shrink-0 rounded-full object-cover" />
+              <div
+                key={msg.id}
+                className={`flex gap-2.5 ${isMe ? "flex-row-reverse" : ""}`}
+              >
+                {senderAvatar ? (
+                  <img
+                    src={senderAvatar}
+                    alt={senderName}
+                    className="h-7 w-7 shrink-0 rounded-full object-cover"
+                  />
                 ) : (
                   <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-accent-blue to-accent-purple text-[10px] font-bold text-white">
-                    {getInitial(msg.fullName)}
+                    {getInitial(senderName)}
                   </div>
                 )}
-                <div className={`min-w-0 max-w-[75%] ${isMe ? "text-right" : ""}`}>
+                <div
+                  className={`min-w-0 max-w-[75%] ${
+                    isMe ? "text-right" : ""
+                  }`}
+                >
                   <div className="mb-0.5 flex items-baseline gap-1.5 text-[10px] text-fg-3">
-                    <span className="font-medium text-fg-2">{isMe ? "You" : msg.fullName}</span>
+                    <span className="font-medium text-fg-2">
+                      {isMe ? "You" : senderName}
+                    </span>
                     <span>{formatTime(msg.timestamp)}</span>
                   </div>
                   <div
-                    className={`inline-block rounded-2xl px-3 py-2 text-sm leading-relaxed break-words ${
-                      isMe ? "bg-accent-blue text-white rounded-tr-sm" : "bg-surface text-fg-2 border border-line rounded-tl-sm"
+                    className={`inline-block rounded-2xl px-3 py-2 text-sm leading-relaxed wrap-break-word ${
+                      isMe
+                        ? "bg-accent-blue text-white rounded-tr-sm"
+                        : "bg-surface text-fg-2 border border-line rounded-tl-sm"
                     }`}
                   >
-                    {msg.text}
+                    {text}
                   </div>
                 </div>
               </div>
@@ -84,7 +119,10 @@ export default function MeetingChat({ messages = [], currentUserId = null, onSen
         )}
       </div>
 
-      <form onSubmit={handleSubmit} className="shrink-0 border-t border-line bg-card p-3">
+      <form
+        onSubmit={handleSubmit}
+        className="shrink-0 border-t border-line bg-card p-3"
+      >
         <div className="flex items-center gap-2">
           <input
             type="text"

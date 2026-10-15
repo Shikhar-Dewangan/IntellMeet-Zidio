@@ -7,18 +7,12 @@ import {
 import PersonalInformationSection from "./PersonalInformationSection.jsx";
 import AppearanceSection from "./AppearanceSection.jsx";
 import SecuritySection from "./SecuritySection.jsx";
-import AccountSection from "./AccountSection.jsx";
-import AudioVideoSection from "./AudioVideoSection.jsx";
-import PrivacySection from "./PrivacySection.jsx";
 import DangerZoneSection from "./DangerZoneSection.jsx";
 
 const TABS = [
   { key: "personal", label: "Personal Information", icon: User, component: PersonalInformationSection },
   { key: "appearance", label: "Appearance", icon: Palette, component: AppearanceSection },
   { key: "security", label: "Security", icon: Lock, component: SecuritySection },
-  { key: "account", label: "Account", icon: Shield, component: AccountSection },
-  { key: "audio", label: "Audio & Video", icon: Mic, component: AudioVideoSection },
-  { key: "privacy", label: "Privacy", icon: Eye, component: PrivacySection },
   { key: "danger", label: "Danger Zone", icon: AlertTriangle, component: DangerZoneSection },
 ];
 

@@ -1,9 +1,10 @@
+// frontend/src/pages/MeetingRoom.jsx
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 import toast from "react-hot-toast";
 import {
-  Menu, Users, MessageSquare, FileText, Captions, Link2, ChevronLeft, X,
+  Users, MessageSquare, FileText, Captions, X, ChevronLeft,
 } from "lucide-react";
 
 import {
@@ -15,9 +16,12 @@ import useSocket from "../../hooks/useSocket.js";
 import useWebRTC from "../../hooks/useWebRTC.js";
 import useLiveCaptions from "../../hooks/useLiveCaptions.js";
 import useMeetingTranscription from "../../hooks/useMeetingTranscription.js";
+import useMeetingDuration from "../../hooks/useMeetingDuration.js";
 
 import VideoGrid from "../../components/meeting/VideoGrid.jsx";
 import MeetingControls from "../../components/meeting/MeetingControls.jsx";
+import MeetingHeader from "../../components/meeting/MeetingHeader.jsx";
+import ParticipantStrip from "../../components/meeting/ParticipantStrip.jsx";
 import ParticipantList from "../../components/meeting/ParticipantList.jsx";
 import MeetingChat from "../../components/meeting/MeetingChat.jsx";
 import MeetingNotes from "../../components/meeting/MeetingNotes.jsx";
@@ -44,22 +48,24 @@ export default function MeetingRoom() {
   const [loading, setLoading] = useState(true);
   const [fatalError, setFatalError] = useState(null);
   const [streamReady, setStreamReady] = useState(false);
-  const [localStream, setLocalStream] = useState(null);   // 👈 ADDED
+  const [localStream, setLocalStream] = useState(null);
+  const [screenStream, setScreenStream] = useState(null);
 
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
   const [screenSharing, setScreenSharing] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [layoutMode, setLayoutMode] = useState("grid");
 
   const [sidePanel, setSidePanel] = useState(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [hostControlsOpen, setHostControlsOpen] = useState(false);
 
   const [remoteParticipants, setRemoteParticipants] = useState([]);
   const [remoteStreams, setRemoteStreams] = useState({});
-  const [mutedUserIds, setMutedUserIds] = useState(new Set());
-  const [videoOffUserIds, setVideoOffUserIds] = useState(new Set());
   const [chatMessages, setChatMessages] = useState([]);
   const [notes, setNotes] = useState("");
   const [notesLastSavedAt, setNotesLastSavedAt] = useState(null);
@@ -70,26 +76,85 @@ export default function MeetingRoom() {
 
   const socketRef = useSocket({ enabled: true });
 
+  const replacePeerVideoTrack = useCallback((track) => {
+    if (!track) return;
+
+    peersRef.current.forEach((pc) => {
+      const sender = pc
+        .getSenders()
+        .find((candidate) => candidate.track?.kind === "video");
+
+      sender?.replaceTrack(track).catch((error) => {
+        console.error("Could not replace the outgoing video track:", error);
+      });
+    });
+  }, []);
+
+  const stopScreenShare = useCallback(() => {
+    const stream = screenStreamRef.current;
+    screenStreamRef.current = null;
+
+    stream?.getTracks().forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
+
+    setScreenStream(null);
+    setScreenSharing(false);
+    replacePeerVideoTrack(localStreamRef.current?.getVideoTracks()[0]);
+    socketRef.current?.emit("participant:activity", { meetingId });
+  }, [meetingId, replacePeerVideoTrack, socketRef]);
+
   const { error: mediaError } = useWebRTC({
     enabled: joined,
     onLocalStream: (stream) => {
       localStreamRef.current = stream;
-      setLocalStream(stream);        // 👈 ADDED
+      setLocalStream(stream);
       setStreamReady(true);
     },
   });
 
-  const { captions, latestCaption, speakingUserId, clearCaptions } = useLiveCaptions({
-    socketRef,
-    meetingId,
-    enabled: joined,
-  });
+  const { captions, latestCaption, speakingUserId, clearCaptions, addCaption } =
+    useLiveCaptions({
+      socketRef,
+      meetingId,
+      enabled: joined,
+    });
 
+  // ✅ FIX: `onTranscript` prop wired
   useMeetingTranscription({
     meetingId,
-    stream: streamReady ? localStreamRef.current : null,
+    stream: streamReady ? localStream : null,
     enabled: joined && micOn && streamReady,
+    onTranscript: (segment) => {
+      // Local fallback — socket delivers too, this dedupes via useLiveCaptions
+      if (segment?.text && addCaption) {
+        addCaption({
+          speakerId: segment.speaker?._id || segment.speaker,
+          speakerName: segment.speaker?.fullName || "You",
+          text: segment.text,
+          language: segment.language,
+          timestamp: segment.startedAt || new Date().toISOString(),
+          sequence: segment.sequence,
+        });
+      }
+    },
   });
+
+  const { formatted: meetingDuration } = useMeetingDuration(
+    meeting?.startedAt,
+    joined
+  );
+
+  // Recording timer
+  useEffect(() => {
+    if (!recording) {
+      setRecordingSeconds(0);
+      return;
+    }
+    const t = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [recording]);
 
   /* ===================== INIT ===================== */
   useEffect(() => {
@@ -102,11 +167,15 @@ export default function MeetingRoom() {
         if (!active) return;
         setMeeting(meetingData);
 
-        const participantIds = (meetingData.participants || []).map(getUserId).filter(Boolean);
+        const participantIds = (meetingData.participants || [])
+          .map(getUserId)
+          .filter(Boolean);
         const hostId = getUserId(meetingData.host);
 
-        const alreadyParticipant = currentUserId && participantIds.includes(currentUserId);
-        const isUserHost = hostId && currentUserId && hostId === currentUserId;
+        const alreadyParticipant =
+          currentUserId && participantIds.includes(currentUserId);
+        const isUserHost =
+          hostId && currentUserId && hostId === currentUserId;
 
         if (!alreadyParticipant && !isUserHost) {
           try {
@@ -153,9 +222,20 @@ export default function MeetingRoom() {
         iceCandidatePoolSize: 10,
       });
 
-      localStreamRef.current?.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current);
+      const cameraStream = localStreamRef.current;
+      const activeScreenStream = screenStreamRef.current;
+
+      cameraStream?.getAudioTracks().forEach((track) => {
+        pc.addTrack(track, cameraStream);
       });
+
+      const activeVideoTrack =
+        activeScreenStream?.getVideoTracks()[0] ||
+        cameraStream?.getVideoTracks()[0];
+
+      if (activeVideoTrack) {
+        pc.addTrack(activeVideoTrack, activeScreenStream || cameraStream);
+      }
 
       pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -173,7 +253,10 @@ export default function MeetingRoom() {
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "closed"
+        ) {
           closePeer(peerId);
         }
       };
@@ -185,7 +268,9 @@ export default function MeetingRoom() {
     const closePeer = (peerId) => {
       const pc = peersRef.current.get(peerId);
       if (pc) {
-        try { pc.close(); } catch {}
+        try {
+          pc.close();
+        } catch {}
         peersRef.current.delete(peerId);
       }
     };
@@ -207,9 +292,13 @@ export default function MeetingRoom() {
           toast.error(response?.message || "Could not join room");
           return;
         }
-        const initial = (response.participants || []).filter((p) => p.userId !== currentUserId);
+        const initial = (response.participants || []).filter(
+          (p) => p.userId !== currentUserId
+        );
         setRemoteParticipants(initial);
-        initial.forEach((p) => createOfferToPeer(p.userId).catch(() => {}));
+        initial.forEach((p) =>
+          createOfferToPeer(p.userId).catch(() => {})
+        );
       });
     };
 
@@ -220,17 +309,22 @@ export default function MeetingRoom() {
       if (!payload?.userId || payload.userId === currentUserId) return;
       setRemoteParticipants((prev) => {
         if (prev.some((p) => p.userId === payload.userId)) return prev;
-        return [...prev, {
-          userId: payload.userId,
-          fullName: payload.fullName || "Participant",
-          avatar: payload.avatar || null,
-        }];
+        return [
+          ...prev,
+          {
+            userId: payload.userId,
+            fullName: payload.fullName || "Participant",
+            avatar: payload.avatar || null,
+          },
+        ];
       });
     };
 
     const handleParticipantLeft = (payload) => {
       if (!payload?.userId) return;
-      setRemoteParticipants((prev) => prev.filter((p) => p.userId !== payload.userId));
+      setRemoteParticipants((prev) =>
+        prev.filter((p) => p.userId !== payload.userId)
+      );
       setRemoteStreams((prev) => {
         const next = { ...prev };
         delete next[payload.userId];
@@ -243,10 +337,16 @@ export default function MeetingRoom() {
       if (!payload?.fromUserId || !payload.offer) return;
       try {
         const pc = getOrCreatePeer(payload.fromUserId);
-        await pc.setRemoteDescription(new RTCSessionDescription(payload.offer));
+        await pc.setRemoteDescription(
+          new RTCSessionDescription(payload.offer)
+        );
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.emit("webrtc:answer", { meetingId, toUserId: payload.fromUserId, answer });
+        socket.emit("webrtc:answer", {
+          meetingId,
+          toUserId: payload.fromUserId,
+          answer,
+        });
       } catch (err) {
         console.error("Offer handling failed:", err);
       }
@@ -258,7 +358,9 @@ export default function MeetingRoom() {
       if (!pc) return;
       try {
         if (pc.signalingState !== "stable") {
-          await pc.setRemoteDescription(new RTCSessionDescription(payload.answer));
+          await pc.setRemoteDescription(
+            new RTCSessionDescription(payload.answer)
+          );
         }
       } catch (err) {
         console.error("Answer handling failed:", err);
@@ -276,16 +378,32 @@ export default function MeetingRoom() {
       }
     };
 
+    /**
+     * ✅ FIX: Chat payload normalize
+     * Backend sends: { sender: {_id, fullName, avatar}, message, timestamp }
+     * Frontend stores: { userId, fullName, avatar, text, timestamp }
+     */
     const handleChat = (payload) => {
-      if (!payload?.text?.trim()) return;
+      if (!payload) return;
+
+      // Handle both payload shapes
+      const senderId = payload.sender?._id || payload.userId;
+      const senderName =
+        payload.sender?.fullName || payload.fullName || "Participant";
+      const senderAvatar =
+        payload.sender?.avatar || payload.avatar || null;
+      const text = payload.message || payload.text || "";
+
+      if (!text.trim()) return;
+
       setChatMessages((prev) => [
         ...prev,
         {
-          id: `${payload.userId}-${Date.now()}-${Math.random()}`,
-          userId: payload.userId,
-          fullName: payload.fullName || "Participant",
-          avatar: payload.avatar || null,
-          text: payload.text.trim(),
+          id: `${senderId}-${Date.now()}-${Math.random()}`,
+          userId: senderId,
+          fullName: senderName,
+          avatar: senderAvatar,
+          text: text.trim(),
           timestamp: payload.timestamp || new Date().toISOString(),
         },
       ]);
@@ -300,25 +418,31 @@ export default function MeetingRoom() {
 
     const handleMuteAll = () => {
       setMicOn(false);
-      localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = false));
+      localStreamRef.current
+        ?.getAudioTracks()
+        .forEach((t) => (t.enabled = false));
       toast("Host muted all participants", { icon: "🔇" });
     };
 
     const handleCameraOffAll = () => {
       setCamOn(false);
-      localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = false));
+      localStreamRef.current
+        ?.getVideoTracks()
+        .forEach((t) => (t.enabled = false));
       toast("Host turned off all cameras", { icon: "📷" });
     };
 
     const handleMeetingEnded = (payload) => {
+      setRecording(false);
       toast.error(
         payload?.reason === "host-inactivity"
           ? "Meeting ended (host inactive)"
-          : payload?.reason === "auto-end-no-activity"
-          ? "Meeting ended (no activity)"
-          : "Meeting has ended",
+          : "Meeting has ended"
       );
-      setTimeout(() => navigate(`/meetings/${meetingId}`, { replace: true }), 1500);
+      setTimeout(
+        () => navigate(`/meetings/${meetingId}`, { replace: true }),
+        1500
+      );
     };
 
     const handleError = (payload) => {
@@ -358,7 +482,11 @@ export default function MeetingRoom() {
 
   useEffect(() => {
     return () => {
-      peersRef.current.forEach((pc) => { try { pc.close(); } catch {} });
+      peersRef.current.forEach((pc) => {
+        try {
+          pc.close();
+        } catch {}
+      });
       peersRef.current.clear();
     };
   }, []);
@@ -367,67 +495,70 @@ export default function MeetingRoom() {
   const toggleMic = () => {
     const next = !micOn;
     setMicOn(next);
-    localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = next));
+    localStreamRef.current
+      ?.getAudioTracks()
+      .forEach((t) => (t.enabled = next));
     socketRef.current?.emit("participant:activity", { meetingId });
   };
 
   const toggleCam = () => {
     const next = !camOn;
     setCamOn(next);
-    localStreamRef.current?.getVideoTracks().forEach((t) => (t.enabled = next));
+    localStreamRef.current
+      ?.getVideoTracks()
+      .forEach((t) => (t.enabled = next));
     socketRef.current?.emit("participant:activity", { meetingId });
   };
 
   const toggleScreen = async () => {
     if (screenSharing) {
-      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current = null;
-      setScreenSharing(false);
-      const camTrack = localStreamRef.current?.getVideoTracks()[0];
-      if (camTrack) {
-        peersRef.current.forEach((pc) => {
-          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender) sender.replaceTrack(camTrack);
-        });
-      }
+      stopScreenShare();
       return;
     }
 
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
       screenStreamRef.current = stream;
       const screenTrack = stream.getVideoTracks()[0];
-      peersRef.current.forEach((pc) => {
-        const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-        if (sender) sender.replaceTrack(screenTrack);
-      });
-      screenTrack.onended = () => {
-        setScreenSharing(false);
-        screenStreamRef.current = null;
-        const camTrack = localStreamRef.current?.getVideoTracks()[0];
-        if (camTrack) {
-          peersRef.current.forEach((pc) => {
-            const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-            if (sender) sender.replaceTrack(camTrack);
-          });
-        }
-      };
+
+      if (!screenTrack) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error("No screen video track was provided");
+      }
+
+      replacePeerVideoTrack(screenTrack);
+      screenTrack.onended = stopScreenShare;
+      setScreenStream(stream);
       setScreenSharing(true);
       socketRef.current?.emit("participant:activity", { meetingId });
     } catch (err) {
-      if (err?.name !== "NotAllowedError") toast.error("Could not start screen share");
+      if (err?.name !== "NotAllowedError") {
+        toast.error("Could not start screen share");
+      }
     }
   };
 
   const toggleHand = () => {
     const next = !handRaised;
     setHandRaised(next);
-    socketRef.current?.emit("meeting:hand-raise", { meetingId, raised: next });
+    socketRef.current?.emit("meeting:hand-raise", {
+      meetingId,
+      raised: next,
+    });
+  };
+
+  const toggleLayout = () => {
+    setLayoutMode((m) => (m === "grid" ? "speaker" : "grid"));
   };
 
   /* ===================== CHAT / NOTES ===================== */
   const sendChat = (text) => {
-    socketRef.current?.emit("chat:message", { meetingId, text });
+    // ✅ FIX: Backend expects `message`, not `text`
+    socketRef.current?.emit("chat:message", { meetingId, message: text });
+    // Optimistic local echo
     setChatMessages((prev) => [
       ...prev,
       {
@@ -448,16 +579,22 @@ export default function MeetingRoom() {
   };
 
   /* ===================== HOST ===================== */
-  const handleMuteAll = () => socketRef.current?.emit("meeting:mute-all", { meetingId });
-  const handleCameraOffAll = () => socketRef.current?.emit("meeting:camera-off-all", { meetingId });
+  const handleMuteAll = () =>
+    socketRef.current?.emit("meeting:mute-all", { meetingId });
+  const handleCameraOffAll = () =>
+    socketRef.current?.emit("meeting:camera-off-all", { meetingId });
 
   const handleEndMeeting = async () => {
     if (!window.confirm("End this meeting for all participants?")) return;
     try {
+      setRecording(false);
       socketRef.current?.emit("meeting:ended", { meetingId });
       await endMeeting(meetingId);
       toast.success("Meeting ended");
-      setTimeout(() => navigate(`/meetings/${meetingId}`, { replace: true }), 500);
+      setTimeout(
+        () => navigate(`/meetings/${meetingId}`, { replace: true }),
+        500
+      );
     } catch (error) {
       toast.error(getApiError(error, "Could not end meeting"));
     }
@@ -465,10 +602,11 @@ export default function MeetingRoom() {
 
   const handleLeave = async () => {
     try {
+      setRecording(false);
       socketRef.current?.emit("meeting:leave", { meetingId });
       if (!isHost) await leaveMeeting(meetingId);
-    } catch {}
-    finally {
+    } catch {
+    } finally {
       navigate(`/meetings/${meetingId}`, { replace: true });
     }
   };
@@ -483,7 +621,11 @@ export default function MeetingRoom() {
     const list = [];
     list.push({
       userId: currentUserId || "me",
-      stream: streamReady ? localStreamRef.current : null,
+      stream: screenSharing
+        ? screenStream
+        : streamReady
+          ? localStream
+          : null,
       participant: {
         userId: currentUserId,
         fullName: currentUser?.fullName || currentUser?.name || "You",
@@ -506,8 +648,8 @@ export default function MeetingRoom() {
           avatar: p.avatar,
           isHost: getUserId(meeting?.host) === p.userId,
           isLocal: false,
-          isMuted: mutedUserIds.has(p.userId),
-          isVideoOff: videoOffUserIds.has(p.userId),
+          isMuted: false,
+          isVideoOff: false,
           isSpeaking: speakingUserId === p.userId,
         },
       });
@@ -515,8 +657,19 @@ export default function MeetingRoom() {
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    currentUserId, currentUser, isHost, micOn, camOn, streamReady,
-    remoteParticipants, remoteStreams, meeting, mutedUserIds, videoOffUserIds, speakingUserId,
+    currentUserId,
+    currentUser,
+    isHost,
+    micOn,
+    camOn,
+    streamReady,
+    localStream,
+    screenSharing,
+    screenStream,
+    remoteParticipants,
+    remoteStreams,
+    meeting,
+    speakingUserId,
   ]);
 
   const participantsList = useMemo(() => {
@@ -535,14 +688,19 @@ export default function MeetingRoom() {
         fullName: p.fullName,
         avatar: p.avatar,
         isHost: getUserId(meeting?.host) === p.userId,
-        isMuted: mutedUserIds.has(p.userId),
-        isVideoOff: videoOffUserIds.has(p.userId),
+        isMuted: false,
+        isVideoOff: false,
       });
     });
     return list;
   }, [
-    currentUserId, currentUser, isHost, micOn, camOn, remoteParticipants,
-    meeting, mutedUserIds, videoOffUserIds,
+    currentUserId,
+    currentUser,
+    isHost,
+    micOn,
+    camOn,
+    remoteParticipants,
+    meeting,
   ]);
 
   /* ===================== RENDER ===================== */
@@ -564,7 +722,9 @@ export default function MeetingRoom() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-rose/15">
             <X className="h-6 w-6 text-accent-rose" />
           </div>
-          <h2 className="text-lg font-semibold text-fg">Could not join meeting</h2>
+          <h2 className="text-lg font-semibold text-fg">
+            Could not join meeting
+          </h2>
           <p className="mt-2 text-sm text-fg-2">{fatalError}</p>
           <button
             onClick={() => navigate(`/meetings/${meetingId}`)}
@@ -580,97 +740,80 @@ export default function MeetingRoom() {
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-page text-fg">
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-line bg-card px-3 py-2.5 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <button
-            onClick={() => setMobileDrawerOpen(true)}
-            className="rounded-lg p-2 text-fg-2 transition hover:bg-surface lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-fg sm:text-base">{meeting?.title || "Meeting"}</p>
-            <p className="flex items-center gap-1.5 text-[11px] text-fg-3">
-              <span className={`h-1.5 w-1.5 rounded-full ${joined ? "bg-accent-emerald" : "bg-accent-amber"}`} />
-              {joined ? "Live" : "Connecting…"}
-              <span className="mx-1">·</span>
-              {participantsList.length} participant{participantsList.length !== 1 ? "s" : ""}
-            </p>
+      {/* ============ HEADER ============ */}
+      <MeetingHeader
+        meeting={meeting}
+        participantCount={participantsList.length}
+        isHost={isHost}
+        recording={recording}
+        recordingSeconds={recordingSeconds}
+        captionsOn={sidePanel === "captions"}
+        sidePanel={sidePanel}
+        meetingDuration={meetingDuration}
+        onToggleChat={() =>
+          setSidePanel((p) => (p === "chat" ? null : "chat"))
+        }
+        onToggleCaptions={() =>
+          setSidePanel((p) => (p === "captions" ? null : "captions"))
+        }
+        onToggleParticipants={() =>
+          setSidePanel((p) =>
+            p === "participants" ? null : "participants"
+          )
+        }
+        onOpenInvite={() => setInviteOpen(true)}
+        onOpenHostControls={
+          isHost ? () => setHostControlsOpen(true) : undefined
+        }
+        onLeave={handleLeave}
+        onToggleMobileDrawer={() => setMobileDrawerOpen(true)}
+      />
+
+      {/* ============ MAIN ============ */}
+      <main className="flex flex-1 min-h-0 flex-col">
+        {/* PARTICIPANT STRIP (mobile-friendly) */}
+        <ParticipantStrip
+          participants={participantsList}
+          currentUserId={currentUserId}
+          onOpenParticipants={() => setSidePanel("participants")}
+          max={8}
+        />
+
+        <div className="flex flex-1 min-h-0 gap-2 p-2 sm:gap-3 sm:p-3">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="relative flex-1 min-h-0">
+              <VideoGrid tiles={tiles} layoutMode={layoutMode} />
+              <LiveCaptionsOverlay
+                caption={latestCaption}
+                visible={joined && sidePanel !== "captions"}
+                onOpenPanel={() => setSidePanel("captions")}
+              />
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {isHost && (
-            <RecordingControls
-              meetingId={meetingId}
-              enabled={joined}
-              streamToRecord={localStream}
-              recording={recording}
-              onToggleRecording={setRecording}
-            />
-          )}
-          <button
-            onClick={() => setInviteOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-card px-2.5 py-2 text-xs font-semibold text-fg transition hover:bg-surface sm:px-3"
-            title="Invite"
-          >
-            <Link2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Invite</span>
-          </button>
-          {isHost && (
-            <HostControls
-              meetingCode={meeting?.meetingCode}
-              isLive={joined}
-              onMuteAll={handleMuteAll}
-              onCameraOffAll={handleCameraOffAll}
-              onEndMeeting={handleEndMeeting}
-              onCopyLink={() => {
-                navigator.clipboard?.writeText(`${window.location.origin}/meetings/${meetingId}/room`);
-                toast.success("Link copied");
-              }}
-              onCopyCode={() => {
-                navigator.clipboard?.writeText(meeting?.meetingCode);
-                toast.success("Code copied");
-              }}
-            />
+          {sidePanel && (
+            <aside className="hidden w-85 shrink-0 overflow-hidden rounded-2xl border border-line bg-card lg:flex">
+              <SidePanelWrapper
+                sidePanel={sidePanel}
+                setSidePanel={setSidePanel}
+                captions={captions}
+                clearCaptions={clearCaptions}
+                participants={participantsList}
+                currentUserId={currentUserId}
+                speakingUserId={speakingUserId}
+                chatMessages={chatMessages}
+                onSendChat={sendChat}
+                notes={notes}
+                onUpdateNotes={updateNotes}
+                notesLastSavedAt={notesLastSavedAt}
+                isLive={joined}
+              />
+            </aside>
           )}
         </div>
-      </header>
-
-      <main className="flex flex-1 min-h-0 gap-2 p-2 sm:gap-3 sm:p-3">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="relative flex-1 min-h-0">
-            <VideoGrid tiles={tiles} />
-            <LiveCaptionsOverlay
-              caption={latestCaption}
-              visible={joined && sidePanel !== "captions"}
-              onOpenPanel={() => setSidePanel("captions")}
-            />
-          </div>
-        </div>
-
-        {sidePanel && (
-          <aside className="hidden w-85 shrink-0 overflow-hidden rounded-2xl border border-line bg-card lg:flex">
-            <SidePanelWrapper
-              sidePanel={sidePanel}
-              setSidePanel={setSidePanel}
-              captions={captions}
-              clearCaptions={clearCaptions}
-              participants={participantsList}
-              currentUserId={currentUserId}
-              speakingUserId={speakingUserId}
-              chatMessages={chatMessages}
-              onSendChat={sendChat}
-              notes={notes}
-              onUpdateNotes={updateNotes}
-              notesLastSavedAt={notesLastSavedAt}
-              isLive={joined}
-            />
-          </aside>
-        )}
       </main>
 
+      {/* ============ BOTTOM CONTROLS ============ */}
       <MeetingControls
         micOn={micOn}
         camOn={camOn}
@@ -679,25 +822,112 @@ export default function MeetingRoom() {
         recording={recording}
         captionsOn={sidePanel === "captions"}
         sidePanel={sidePanel}
+        layoutMode={layoutMode}
         isHost={isHost}
         onToggleMic={toggleMic}
         onToggleCam={toggleCam}
         onToggleScreen={toggleScreen}
         onToggleHand={toggleHand}
         onToggleRecord={() => setRecording((v) => !v)}
-        onToggleCaptions={() => setSidePanel((p) => (p === "captions" ? null : "captions"))}
-        onToggleChat={() => setSidePanel((p) => (p === "chat" ? null : "chat"))}
-        onToggleParticipants={() => setSidePanel((p) => (p === "participants" ? null : "participants"))}
+        onToggleCaptions={() =>
+          setSidePanel((p) => (p === "captions" ? null : "captions"))
+        }
+        onToggleChat={() =>
+          setSidePanel((p) => (p === "chat" ? null : "chat"))
+        }
+        onToggleParticipants={() =>
+          setSidePanel((p) =>
+            p === "participants" ? null : "participants"
+          )
+        }
+        onToggleLayout={toggleLayout}
+        onOpenHostControls={
+          isHost ? () => setHostControlsOpen(true) : undefined
+        }
         onLeave={handleLeave}
       />
 
+      {/* The recorder runs behind the visible Record button in MeetingControls. */}
+      {isHost && (
+        <RecordingControls
+          meetingId={meetingId}
+          enabled={joined}
+          streamToRecord={localStream}
+          recording={recording}
+          controlled
+          headless
+          onToggleRecording={setRecording}
+        />
+      )}
+
+      {/* ============ HOST CONTROLS MODAL ============ */}
+      {isHost && hostControlsOpen && (
+        <>
+          <div
+            onClick={() => setHostControlsOpen(false)}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-2xl border border-line bg-card shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between border-b border-line px-5 py-4">
+                <h2 className="text-base font-semibold text-fg">
+                  Host controls
+                </h2>
+                <button
+                  onClick={() => setHostControlsOpen(false)}
+                  className="rounded-lg p-2 text-fg-3 hover:bg-surface"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="p-4 space-y-2">
+                <button
+                  onClick={() => {
+                    handleMuteAll();
+                    setHostControlsOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-fg hover:bg-card transition"
+                >
+                  Mute all participants
+                </button>
+                <button
+                  onClick={() => {
+                    handleCameraOffAll();
+                    setHostControlsOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-fg hover:bg-card transition"
+                >
+                  Turn off all cameras
+                </button>
+                <button
+                  onClick={() => {
+                    setHostControlsOpen(false);
+                    handleEndMeeting();
+                  }}
+                  className="w-full flex items-center gap-2 rounded-xl border border-accent-rose/30 bg-accent-rose/10 px-4 py-3 text-sm font-semibold text-accent-rose hover:bg-accent-rose/20 transition"
+                >
+                  End meeting for all
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ============ MOBILE DRAWER ============ */}
       {mobileDrawerOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div onClick={() => setMobileDrawerOpen(false)} className="absolute inset-0 bg-black/60" />
+          <div
+            onClick={() => setMobileDrawerOpen(false)}
+            className="absolute inset-0 bg-black/60"
+          />
           <div className="absolute right-0 top-0 flex h-full w-[85vw] max-w-sm flex-col border-l border-line bg-card">
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <p className="text-sm font-semibold text-fg">Meeting panel</p>
-              <button onClick={() => setMobileDrawerOpen(false)} className="rounded-lg p-2 text-fg-3 hover:bg-surface">
+              <button
+                onClick={() => setMobileDrawerOpen(false)}
+                className="rounded-lg p-2 text-fg-3 hover:bg-surface"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -712,7 +942,9 @@ export default function MeetingRoom() {
                   key={tab.key}
                   onClick={() => setSidePanel(tab.key)}
                   className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                    sidePanel === tab.key ? "bg-accent-blue text-white" : "bg-surface text-fg-2 hover:bg-card"
+                    sidePanel === tab.key
+                      ? "bg-accent-blue text-white"
+                      : "bg-surface text-fg-2 hover:bg-card"
                   }`}
                 >
                   <tab.icon className="h-3.5 w-3.5" />
@@ -759,9 +991,19 @@ export default function MeetingRoom() {
 }
 
 function SidePanelWrapper({
-  sidePanel, setSidePanel, captions, clearCaptions, participants,
-  currentUserId, speakingUserId, chatMessages, onSendChat,
-  notes, onUpdateNotes, notesLastSavedAt, isLive,
+  sidePanel,
+  setSidePanel,
+  captions,
+  clearCaptions,
+  participants,
+  currentUserId,
+  speakingUserId,
+  chatMessages,
+  onSendChat,
+  notes,
+  onUpdateNotes,
+  notesLastSavedAt,
+  isLive,
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -776,7 +1018,9 @@ function SidePanelWrapper({
             key={tab.key}
             onClick={() => setSidePanel(tab.key)}
             className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-              sidePanel === tab.key ? "bg-accent-blue text-white" : "text-fg-2 hover:bg-surface"
+              sidePanel === tab.key
+                ? "bg-accent-blue text-white"
+                : "text-fg-2 hover:bg-surface"
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
@@ -788,17 +1032,34 @@ function SidePanelWrapper({
       <div className="flex-1 min-h-0">
         {sidePanel === "participants" && (
           <div className="h-full overflow-y-auto p-3">
-            <ParticipantList participants={participants} speakingUserId={speakingUserId} currentUserId={currentUserId} />
+            <ParticipantList
+              participants={participants}
+              speakingUserId={speakingUserId}
+              currentUserId={currentUserId}
+            />
           </div>
         )}
         {sidePanel === "chat" && (
-          <MeetingChat messages={chatMessages} currentUserId={currentUserId} onSend={onSendChat} />
+          <MeetingChat
+            messages={chatMessages}
+            currentUserId={currentUserId}
+            onSend={onSendChat}
+          />
         )}
         {sidePanel === "captions" && (
-          <LiveCaptionsPanel captions={captions} onClose={() => setSidePanel(null)} onClear={clearCaptions} isLive={isLive} />
+          <LiveCaptionsPanel
+            captions={captions}
+            onClose={() => setSidePanel(null)}
+            onClear={clearCaptions}
+            isLive={isLive}
+          />
         )}
         {sidePanel === "notes" && (
-          <MeetingNotes value={notes} onChange={onUpdateNotes} lastSavedAt={notesLastSavedAt} />
+          <MeetingNotes
+            value={notes}
+            onChange={onUpdateNotes}
+            lastSavedAt={notesLastSavedAt}
+          />
         )}
       </div>
     </div>

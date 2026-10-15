@@ -19,6 +19,7 @@ import { setMobileSidebarOpen } from "../../store/slices/uiSlice.js";
 import { clearCredentials } from "../../store/slices/authSlice.js";
 import { logoutUser } from "../../services/auth.service.js";
 import { getUnreadNotifications } from "../../services/notification.service.js";
+import GlobalSearch from "../search/GlobalSearch.jsx";
 import { unwrapApiList } from "../../utils/apiData.js";
 import useSocket from "../../hooks/useSocket.js";
 import toast from "react-hot-toast";
@@ -160,15 +161,10 @@ export default function Header() {
           <ThemeToggle />
         </div>
 
-        {/* CENTER: Search bar */}
+        {/* CENTER: Global search */}
         <div className="flex justify-center">
-          <div className="relative w-full max-w-2xl xl:max-w-3xl">
-            <Search className="w-4 h-4 text-fg-3 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search meetings, notes, tasks, or projects..."
-              className="w-full rounded-xl border border-line bg-card py-2.5 pl-9 pr-4 text-sm text-fg placeholder:text-fg-3 transition focus:border-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/20"
-            />
+          <div className="w-full max-w-2xl xl:max-w-3xl">
+            <GlobalSearch placeholder="Search meetings, notes, tasks, or projects..." />
           </div>
         </div>
 
@@ -315,14 +311,7 @@ export default function Header() {
 
       {/* ================= MOBILE SEARCH ROW ================= */}
       <div className="lg:hidden px-4 pb-3">
-        <div className="relative w-full">
-          <Search className="w-4 h-4 text-fg-3 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Search meetings, notes, tasks..."
-            className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-card border border-line focus:border-accent-500 focus:ring-2 focus:ring-accent-500/20 focus:outline-none text-sm text-fg placeholder:text-fg-3 transition"
-          />
-        </div>
+        <GlobalSearch placeholder="Search meetings, notes, tasks..." />
       </div>
     </header>
   );

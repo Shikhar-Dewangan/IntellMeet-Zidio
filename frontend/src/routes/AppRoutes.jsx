@@ -19,6 +19,8 @@ import Meetings from "../pages/meetings/Meetings.jsx";
 import Projects from "../pages/projects/Projects.jsx";
 import ProjectDetails from "../pages/projects/ProjectDetails.jsx";
 import Tasks from "../pages/tasks/Tasks.jsx";
+import CreateTask from "../pages/tasks/CreateTask.jsx";
+import TaskDetails from "../pages/tasks/TaskDetails.jsx";
 import Teams from "../pages/teams/Teams.jsx";
 import TeamDetails from "../pages/teams/TeamDetails.jsx";
 import CreateMeeting from "../pages/meetings/CreateMeeting.jsx";
@@ -106,6 +108,8 @@ function AppRoutes() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId/*" element={<ProjectDetails />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/tasks/new" element={<CreateTask />} />
+          <Route path="/tasks/:taskId" element={<TaskDetails />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/settings" element={<Settings />} />

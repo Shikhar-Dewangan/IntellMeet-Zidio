@@ -1,3 +1,4 @@
+// frontend/src/services/team.service.js
 import api from "./api.js";
 
 export const createTeam = async (teamData) => {
@@ -32,5 +33,21 @@ export const addTeamMember = async (teamId, userId) => {
 
 export const removeTeamMember = async (teamId, userId) => {
   const response = await api.delete(`/teams/${teamId}/members/${userId}`);
+  return response.data;
+};
+
+/* ---------- Team-scoped Project Owner authorization ---------- */
+
+export const grantTeamProjectOwner = async (teamId, userId) => {
+  const response = await api.post(`/teams/${teamId}/project-owners`, {
+    userId,
+  });
+  return response.data;
+};
+
+export const revokeTeamProjectOwner = async (teamId, userId) => {
+  const response = await api.delete(
+    `/teams/${teamId}/project-owners/${userId}`
+  );
   return response.data;
 };

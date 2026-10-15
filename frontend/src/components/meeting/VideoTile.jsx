@@ -1,7 +1,14 @@
+// frontend/src/components/meeting/VideoTile.jsx
 import { useEffect, useRef } from "react";
-import { MicOff, VideoOff, Crown, Volume2 } from "lucide-react";
+import { MicOff, VideoOff, Crown, Volume2, Pin } from "lucide-react";
 
-export default function VideoTile({ stream = null, participant = {}, className = "" }) {
+export default function VideoTile({
+  stream = null,
+  participant = {},
+  className = "",
+  compact = false,
+  pinned = false,
+}) {
   const videoRef = useRef(null);
 
   const {
@@ -12,6 +19,7 @@ export default function VideoTile({ stream = null, participant = {}, className =
     isMuted = false,
     isVideoOff = false,
     isSpeaking = false,
+    isPinned = false,
   } = participant;
 
   useEffect(() => {
@@ -20,7 +28,6 @@ export default function VideoTile({ stream = null, participant = {}, className =
 
     if (stream && video.srcObject !== stream) {
       video.srcObject = stream;
-      // ✅ Safe play — handle autoplay block gracefully
       const p = video.play();
       if (p?.catch) p.catch(() => {});
     }
@@ -35,10 +42,13 @@ export default function VideoTile({ stream = null, participant = {}, className =
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl border bg-linear-to-br from-surface to-page transition ${
-        isSpeaking ? "border-accent-emerald/60 ring-2 ring-accent-emerald/30" : "border-line"
+      className={`group relative overflow-hidden rounded-2xl border bg-linear-to-br from-surface to-page transition ${
+        isSpeaking
+          ? "border-accent-emerald ring-2 ring-accent-emerald/40"
+          : "border-line"
       } ${className}`}
     >
+      {/* VIDEO */}
       <video
         ref={videoRef}
         autoPlay
@@ -49,49 +59,74 @@ export default function VideoTile({ stream = null, participant = {}, className =
         }`}
       />
 
+      {/* CAMERA OFF / NO STREAM PLACEHOLDER */}
       {!hasVideo && (
         <div className="absolute inset-0 flex items-center justify-center">
           {avatar ? (
-            <img src={avatar} alt={fullName} className="h-20 w-20 rounded-full object-cover ring-2 ring-line sm:h-24 sm:w-24" />
+            <img
+              src={avatar}
+              alt={fullName}
+              className={`rounded-full object-cover ring-2 ring-line ${
+                compact ? "h-10 w-10" : "h-16 w-16 sm:h-20 sm:w-20"
+              }`}
+            />
           ) : (
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-linear-to-br from-accent-blue to-accent-purple text-2xl font-bold text-white shadow-lg sm:h-24 sm:w-24 sm:text-3xl">
+            <div
+              className={`flex items-center justify-center rounded-full bg-linear-to-br from-accent-blue to-accent-violet font-bold text-white shadow-lg ${
+                compact
+                  ? "h-10 w-10 text-base"
+                  : "h-16 w-16 text-2xl sm:h-20 sm:w-20 sm:text-3xl"
+              }`}
+            >
               {initial}
             </div>
           )}
         </div>
       )}
 
+      {/* TOP-RIGHT: Video off icon */}
       {isVideoOff && (
-        <div className="absolute right-2 top-2 rounded-lg bg-black/60 p-1.5 backdrop-blur-sm">
-          <VideoOff className="h-3.5 w-3.5 text-white" />
+        <div className="absolute right-2 top-2 rounded-lg bg-black/70 p-1.5 backdrop-blur-sm">
+          <VideoOff className="h-3 w-3 text-white" />
         </div>
       )}
 
-      {!isVideoOff && isSpeaking && (
+      {/* TOP-RIGHT: Speaking icon */}
+      {!isVideoOff && isSpeaking && !compact && (
         <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-lg bg-accent-emerald shadow-lg">
           <Volume2 className="h-3.5 w-3.5 text-white" />
         </div>
       )}
 
+      {/* TOP-LEFT: Host badge */}
+      {isHost && !compact && (
+        <div className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-lg bg-accent-violet/90 px-2 py-1 backdrop-blur-sm">
+          <Crown className="h-3 w-3 text-white" />
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-white">
+            Host
+          </span>
+        </div>
+      )}
+
+      {/* BOTTOM: Name + mic status pill */}
       <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-2">
-        <div className="inline-flex max-w-[70%] items-center gap-1.5 rounded-lg bg-black/60 px-2.5 py-1 backdrop-blur-sm">
+        <div className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-black/70 px-2.5 py-1.5 backdrop-blur-sm">
           {isMuted ? (
             <MicOff className="h-3 w-3 shrink-0 text-accent-rose" />
           ) : (
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isSpeaking ? "animate-pulse bg-accent-emerald" : "bg-accent-emerald/60"}`} />
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                isSpeaking
+                  ? "bg-accent-emerald animate-pulse"
+                  : "bg-accent-emerald/60"
+              }`}
+            />
           )}
           <span className="truncate text-[11px] font-medium text-white">
             {fullName}
             {isLocal && <span className="ml-1 text-white/60">(You)</span>}
           </span>
         </div>
-
-        {isHost && (
-          <div className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-accent-violet/90 px-2 py-1 backdrop-blur-sm">
-            <Crown className="h-3 w-3 text-white" />
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-white">Host</span>
-          </div>
-        )}
       </div>
     </div>
   );
