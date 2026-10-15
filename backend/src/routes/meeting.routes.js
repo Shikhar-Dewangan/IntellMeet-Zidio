@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express from "express";
 
 import {
     createMeeting,
@@ -6,26 +6,36 @@ import {
     getMyMeetings,
     updateMeeting,
     deleteMeeting,
+    startMeeting,
     joinMeeting,
-    leaveMeeting
+    leaveMeeting,
+    endMeeting,
+    inviteUsersToMeeting,
+    acceptMeetingInvitation,
+    rejectMeetingInvitation
 } from "../controllers/meeting.controller.js";
 
 import { verifyJWT } from "../middleware/auth.middleware.js";
 
-const router = Router();
+const router = express.Router();
 
+// All meeting routes require authentication
 router.use(verifyJWT);
 
+// Meeting CRUD
 router.post("/", createMeeting);
-
 router.get("/", getMyMeetings);
 router.get("/:meetingId", getMeetingById);
-
 router.patch("/:meetingId", updateMeeting);
-
 router.delete("/:meetingId", deleteMeeting);
+router.post("/:meetingId/invite", inviteUsersToMeeting);
+router.post("/:meetingId/invitation/accept", acceptMeetingInvitation);
+router.post("/:meetingId/Invitation/reject", rejectMeetingInvitation);
 
+// Meeting lifecycle
+router.post("/:meetingId/start", startMeeting);
 router.post("/:meetingId/join", joinMeeting);
 router.post("/:meetingId/leave", leaveMeeting);
+router.post("/:meetingId/end", endMeeting);
 
 export default router;

@@ -1,10 +1,12 @@
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/ApiResponse.js";
+import ApiError from "../utils/ApiError.js";
+import dotenv from "dotenv";
 import User from "../models/user.model.js";
 import jwt from "jsonwebtoken";
-import { OAuth2Client } from "google-auth-library";
-import crypto from "node:crypto";
+import { verifyGoogleToken } from "../utils/googleAuth.js";
 
+dotenv.config({ path: "./.env" });
 
 const cookieOptions = {
     httpOnly: true,
@@ -18,27 +20,26 @@ const generateAccessTokenAndRefreshToken = async (user) => {
     const refreshToken = user.generateRefreshToken();
 
     user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
 
-    await user.save({
-        validateBeforeSave: false,
-    });
-
-    return {
-        accessToken,
-        refreshToken,
-    };
+    return { accessToken, refreshToken };
 };
 
 
 // Register User
 const registerUser = asyncHandler(async (req, res) => {
-    const { fullName, phone, password, email } = req.body
+    const { fullName, phone, password, email } = req.body;
 
     if (!fullName || !email || !password || !phone) {
         throw new ApiError(400, "Please provide all required fields");
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPhone = phone.trim().replace(/[\s-]/g, "");
+
+    if (!/^\+?[1-9]\d{7,14}$/.test(normalizedPhone)) {
+        throw new ApiError(400, "Please provide a valid phone number");
+    }
 
     const existingUser = await User.findOne(
         {
@@ -54,7 +55,7 @@ const registerUser = asyncHandler(async (req, res) => {
         email: normalizedEmail,
         password,
         role: "member",
-        phone,
+        phone: normalizedPhone,
         authProvider: "local",
     });
 
@@ -64,9 +65,19 @@ const registerUser = asyncHandler(async (req, res) => {
         throw new ApiError(500, "User creation failed");
     };
 
+    const { accessToken, refreshToken } = await generateAccessTokenAndRefreshToken(user);
+
     return res
         .status(201)
-        .json(new ApiResponse(201, "User registered successfully", createdUser));
+        .cookie("refreshToken", refreshToken, cookieOptions)
+        .cookie("accessToken", accessToken, cookieOptions)
+        .json(
+            new ApiResponse(
+                201,
+                { user: createdUser, accessToken, refreshToken },
+                "User registered successfully"
+            )
+        );
 
 });
 
@@ -81,11 +92,9 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const normalizedEmail = email.trim().toLowerCase();
 
-  const user = await User.findOne(
-    {
-      email: normalizedEmail
-    }.select("+password ")
-  );
+  const user = await User.findOne({
+    email: normalizedEmail,
+  }).select("+password +refreshToken");
 
   if (!user) {
     throw new ApiError(401, "Invalid email or password");
@@ -106,13 +115,13 @@ const loginUser = asyncHandler(async (req, res) => {
     )
   };
 
-  const isPasswordCorrecet = await user.IsPasswordCorrect(password);
+  const isPasswordCorrect = await user.isPasswordCorrect(password);
 
-  if (!isPasswordCorrecet) {
+  if (!isPasswordCorrect) {
     throw new ApiError(401, "Invalid email or password")
   };
 
-  const { accessToken, refreshToken } = await genrateAccessTokenAndRefreshToken(user);
+  const { accessToken, refreshToken } = await generateAccessTokenAndRefreshToken(user);
 
   const userData = await User.findById(user._id).select("-password -refreshToken");
 
@@ -120,7 +129,13 @@ const loginUser = asyncHandler(async (req, res) => {
     .status(200)
     .cookie("refreshToken", refreshToken, cookieOptions)
     .cookie("accessToken", accessToken, cookieOptions)
-    .json(new ApiResponse(200, "User logged in successfully", { user: userData, accessToken, refreshToken }));
+    .json(
+      new ApiResponse(
+        200,
+        { user: userData, accessToken, refreshToken },
+        "User logged in successfully"
+      )
+    );
 
 
 });
@@ -138,9 +153,9 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 
     const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
 
-    const user = await User.findById(decodedToken?._id)
+const user = await User.findById(decodedToken?._id).select("+refreshToken");
 
-    if (!user) {
+    if (!user || !user.isActive) {
       throw new ApiError(401, "User not found. Please login again.");
     }
 
@@ -148,10 +163,12 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
       throw new ApiError(401, "Refresh token does not match. Please login again.");
     }
 
-    const { accessToken, refreshToken: newRefreshToken } = await genrateAccessTokenAndRefreshToken(user);
+    const { accessToken, refreshToken: newRefreshToken } = await generateAccessTokenAndRefreshToken(user);
 
     return res
       .status(200)
+      .cookie("refreshToken", newRefreshToken, cookieOptions)
+      .cookie("accessToken", accessToken, cookieOptions)
       .json(new ApiResponse(200, { accessToken, refreshToken: newRefreshToken }, "Access token refreshed successfully"));
 
   } catch (error) {
@@ -173,7 +190,7 @@ const logoutUser = asyncHandler(async (req, res) => {
     .clearCookie("refreshToken", cookieOptions)
     .clearCookie("accessToken", cookieOptions)
     .status(200)
-    .json(new ApiResponse(200, "User logged out successfully", null));
+    .json(new ApiResponse(200, null, "User logged out successfully"));
 
 });
 
@@ -181,12 +198,12 @@ const logoutUser = asyncHandler(async (req, res) => {
 
 // Forgot Password
 const forgotPassword = asyncHandler(async (req, res) => {
-    // logic
+  throw new ApiError(501, "Password recovery is not configured");
 });
 
 // Reset Password
 const resetPassword = asyncHandler(async (req, res) => {
-    // logic
+  throw new ApiError(501, "Password recovery is not configured");
 });
 
 const googleAuth = asyncHandler(async (req, res) => {
@@ -265,13 +282,8 @@ const googleAuth = asyncHandler(async (req, res) => {
       googleId,
       role : "member",
       authProvider: "google",
-      avatar: {
-        url: picture || null,
-        publicId: null,
-      },
-      isEmailVerified: true,
+      avatar: picture || "",
       isActive: true,
-      lastLoginAt: new Date(),
     });
 
     isNewUser = true;
@@ -292,21 +304,11 @@ const googleAuth = asyncHandler(async (req, res) => {
       );
     }
 
-    // Never change existing role from frontend input.
-    if (user.role !== role) {
-      throw new ApiError(
-        409,
-        `This Google account is already registered as a ${user.role}`
-      );
-    }
-
     if (!user.googleId) {
       user.googleId = googleId;
       await user.save({ validateBeforeSave: false });
     }
   }
-
-  user.lastLoginAt = new Date();
 
   const { accessToken, refreshToken } =
     await generateAccessTokenAndRefreshToken(user);
@@ -324,9 +326,6 @@ const googleAuth = asyncHandler(async (req, res) => {
         {
           user: loggedInUser,
           isNewUser,
-          requiresOnboarding:
-            user.role === "provider" &&
-            !user.onboardingCompleted,
         },
         "Google login successful"
       )

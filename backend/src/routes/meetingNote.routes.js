@@ -3,8 +3,9 @@ import { Router } from "express";
 import {
     createMeetingNote,
     getMeetingNotes,
+    getMeetingNoteById,
     updateMeetingNote,
-    deleteMeetingNote
+    deleteMeetingNote,
 } from "../controllers/meetingNote.controller.js";
 
 import { verifyJWT } from "../middleware/auth.middleware.js";
@@ -13,12 +14,14 @@ const router = Router();
 
 router.use(verifyJWT);
 
-router.post("/", createMeetingNote);
+router.route("/")
+    .post(createMeetingNote);
 
 router.get("/meeting/:meetingId", getMeetingNotes);
+router.get("/:noteId", getMeetingNoteById);
 
-router.patch("/:noteId", updateMeetingNote);
-
-router.delete("/:noteId", deleteMeetingNote);
+router.route("/:noteId")
+    .patch(updateMeetingNote)
+    .delete(deleteMeetingNote);
 
 export default router;

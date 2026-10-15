@@ -1,11 +1,18 @@
+import mongoose from "mongoose";
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiResponse from "../utils/ApiResponse.js";
+import ApiError from "../utils/ApiError.js";
 import User from "../models/user.model.js";
-import {uploadFileToCloudinary} from "../utils/FileUplode.js"
+import { buildCloudinaryFolder, uploadFileToCloudinary } from "../utils/FileUplode.js";
 
 
 // Get Current User
 const getCurrentUser = asyncHandler(async (req, res) => {
+    if (!req.user) {
+        return res
+            .status(200)
+            .json(new ApiResponse(200, null, "No active session"));
+    }
 
        const user = await User.findById(req.user._id).select(
         "-password -refreshToken"
@@ -52,6 +59,10 @@ const getUserById = asyncHandler(async (req, res) => {
         );
     }
 
+    if (req.user.role !== "admin" && user._id.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "You are not authorized to view this user profile");
+    }
+
     return res
         .status(200)
         .json(
@@ -69,7 +80,7 @@ const updateProfile = asyncHandler(async (req, res) => {
 
      const { fullName } = req.body;
 
-    if (fullName === undefined) {
+    if (typeof fullName !== "string") {
         throw new ApiError(
             400,
             "Full name is required"
@@ -117,6 +128,39 @@ const updateProfile = asyncHandler(async (req, res) => {
 
 });
 
+// Update account appearance preferences
+const updateAppearance = asyncHandler(async (req, res) => {
+    const { accent, fontSize } = req.body;
+    const allowedAccents = ["indigo", "violet", "pink", "red", "orange", "green", "blue"];
+    const allowedFontSizes = ["small", "medium", "large"];
+
+    if (!allowedAccents.includes(accent) || !allowedFontSizes.includes(fontSize)) {
+        throw new ApiError(400, "Invalid appearance preferences");
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set: {
+                "appearance.accent": accent,
+                "appearance.fontSize": fontSize,
+            },
+        },
+        {
+            new: true,
+            runValidators: true,
+        }
+    ).select("-password -refreshToken");
+
+    if (!updatedUser) {
+        throw new ApiError(404, "User not found");
+    }
+
+    return res.status(200).json(
+        new ApiResponse(200, updatedUser, "Appearance updated successfully")
+    );
+});
+
 // Update Avatar
 const updateAvatar = asyncHandler(async (req, res) => {
     
@@ -126,8 +170,14 @@ const updateAvatar = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Avatar is required");
     }
 
+    const avatarFolder = buildCloudinaryFolder({
+        entityType: "avatars",
+        userId: req.user._id.toString(),
+    });
+
     const uploadedAvatar = await uploadFileToCloudinary(
-        avatarLocalPath
+        avatarLocalPath,
+        avatarFolder
     );
 
     if (!uploadedAvatar?.secure_url) {
@@ -169,7 +219,7 @@ const updatePhone = asyncHandler(async (req, res) => {
     const { phone } = req.body;
 
 
-    if (phone === undefined) {
+    if (typeof phone !== "string") {
         throw new ApiError(
             400,
             "Phone number is required"
@@ -230,7 +280,7 @@ const updateLocation = asyncHandler(async (req, res) => {
      const { location } = req.body;
 
 
-    if (location === undefined) {
+    if (typeof location !== "string") {
         throw new ApiError(
             400,
             "Location is required"
@@ -285,11 +335,52 @@ const updateLocation = asyncHandler(async (req, res) => {
 
 });
 
+// Search Registered Users
+const searchUsers = asyncHandler(async (req, res) => {
+    const { q } = req.query;
+
+    if (!q || !q.trim()) {
+        throw new ApiError(400, "Search query is required");
+    }
+
+    const searchQuery = q.trim();
+
+    const users = await User.find({
+        _id: { $ne: req.user._id },
+        $or: [
+            {
+                fullName: {
+                    $regex: searchQuery,
+                    $options: "i",
+                },
+            },
+            {
+                email: {
+                    $regex: searchQuery,
+                    $options: "i",
+                },
+            },
+        ],
+    })
+        .select("_id fullName email avatar")
+        .limit(10);
+
+    return res.status(200).json(
+        new ApiResponse(
+            200,
+            users,
+            "Users fetched successfully"
+        )
+    );
+});
+
 export {
     getCurrentUser,
     getUserById,
     updateProfile,
+    updateAppearance,
     updateAvatar,
     updatePhone,
-    updateLocation
+    updateLocation,
+    searchUsers
 };
