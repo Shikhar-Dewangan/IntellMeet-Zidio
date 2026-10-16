@@ -12,7 +12,7 @@ dotenv.config({ path: "./.env" });
 
 const app = express();
 
-const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:5174")
+const allowedOrigins = (process.env.CLIENT_URL)
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
