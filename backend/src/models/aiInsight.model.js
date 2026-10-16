@@ -1,3 +1,4 @@
+// backend/models/aiInsight.model.js
 import mongoose from "mongoose";
 
 const actionItemSchema = new mongoose.Schema(
@@ -8,29 +9,24 @@ const actionItemSchema = new mongoose.Schema(
             trim: true,
             maxlength: 200,
         },
-
         description: {
             type: String,
-            default: "",
             trim: true,
+            default: "",
             maxlength: 2000,
         },
-
-        assigneeName: {
+        owner: {
             type: String,
-            default: null,
             trim: true,
-            maxlength: 100,
+            default: "Not assigned",
         },
-
-        dueDate: {
-            type: Date,
-            default: null,
+        deadline: {
+            type: String,
+            trim: true,
+            default: "Not specified",
         },
     },
-    {
-        _id: true,
-    }
+    { _id: false }
 );
 
 const aiInsightSchema = new mongoose.Schema(
@@ -40,72 +36,42 @@ const aiInsightSchema = new mongoose.Schema(
             ref: "Meeting",
             required: true,
             unique: true,
-            index: true,
         },
-
-        // Optional because recording is NOT required for AI.
-        recording: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "Recording",
-            default: null,
-        },
-
         transcript: {
             type: String,
-            required: true,
             default: "",
         },
-
         summary: {
             type: String,
             default: "",
         },
-
-        keyPoints: {
-            type: [String],
-            default: [],
-        },
-
-        decisions: {
-            type: [String],
-            default: [],
-        },
-
         actionItems: {
             type: [actionItemSchema],
             default: [],
         },
-
         status: {
             type: String,
             enum: [
+                "pending",
                 "processing",
                 "completed",
                 "failed",
                 "unavailable",
             ],
-            default: "processing",
+            default: "pending",
         },
-
         error: {
             type: String,
             default: "",
         },
-
         processedAt: {
             type: Date,
             default: null,
         },
     },
-
-    {
-        timestamps: true,
-    }
+    { timestamps: true }
 );
 
-const AIInsight = mongoose.model(
-    "AIInsight",
-    aiInsightSchema
-);
+const AIInsight = mongoose.model("AIInsight", aiInsightSchema);
 
 export default AIInsight;

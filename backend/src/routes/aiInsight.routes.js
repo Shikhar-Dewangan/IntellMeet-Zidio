@@ -1,18 +1,15 @@
-import express from "express";
-
-import {verifyJWT} from "../middleware/auth.middleware.js";
-
+// backend/routes/aiInsight.routes.js
+import { Router } from "express";
 import {
     getMeetingAIInsight,
+    generateMeetingAIInsight,
 } from "../controllers/aiInsight.controller.js";
+import { verifyJWT } from "../middleware/auth.middleware.js";
 
-const router = express.Router();
-
+const router = Router();
 router.use(verifyJWT);
 
-router.get(
-    "/:meetingId",
-    getMeetingAIInsight
-);
+router.get("/meetings/:meetingId", getMeetingAIInsight);
+router.post("/meetings/:meetingId/generate", generateMeetingAIInsight);
 
 export default router;

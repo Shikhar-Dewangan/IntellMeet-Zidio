@@ -24,6 +24,7 @@ import {
     uploadFileToCloudinary,
     deleteFileFromCloudinary,
 } from "../utils/FileUplode.js";
+import { createBulkNotifications } from "../services/notification.service.js";
 
 const validStatus = ["todo", "in-progress", "completed"];
 const validPriority = ["low", "medium", "high"];
@@ -264,6 +265,20 @@ const createTask = asyncHandler(async (req, res) => {
 
     const populatedTask = await populateTask(Task.findById(task._id));
 
+    if (task.assignee && idString(task.assignee) !== req.user._id.toString()) {
+        await createBulkNotifications([{
+            recipient: task.assignee,
+            actor: req.user._id,
+            type: "task_assigned",
+            title: "Task assigned to you",
+            message: `You were assigned "${task.title}".`,
+            relatedTask: task._id,
+            relatedProject: task.project,
+            relatedTeam: task.team,
+            actionUrl: `/tasks/${task._id}`,
+        }]);
+    }
+
     return res
         .status(201)
         .json(new ApiResponse(201, populatedTask, "Task created successfully"));
@@ -441,6 +456,14 @@ const updateTask = asyncHandler(async (req, res) => {
 
     const task = await Task.findById(taskId);
     if (!task) throw new ApiError(404, "Task not found");
+    const previousState = {
+        assignee: idString(task.assignee),
+        status: task.status,
+        title: task.title,
+        description: task.description,
+        priority: task.priority,
+        dueDate: task.dueDate?.getTime() ?? null,
+    };
 
     const userId = req.user._id.toString();
     const isAdmin = req.user.role === "admin";
@@ -558,6 +581,90 @@ const updateTask = asyncHandler(async (req, res) => {
 
     const updatedTask = await populateTask(Task.findById(task._id));
 
+    const actorId = req.user._id.toString();
+    const currentAssigneeId = idString(task.assignee);
+    const assignmentChanged = previousState.assignee !== currentAssigneeId;
+    const notifications = [];
+    const notifiedRecipients = new Set();
+    const addTaskNotification = (
+        recipient,
+        type,
+        title,
+        message,
+        actionUrl = `/tasks/${task._id}`
+    ) => {
+        if (!recipient || recipient === actorId || notifiedRecipients.has(recipient)) {
+            return;
+        }
+        notifiedRecipients.add(recipient);
+        notifications.push({
+            recipient,
+            actor: req.user._id,
+            type,
+            title,
+            message,
+            relatedTask: task._id,
+            relatedProject: task.project,
+            relatedTeam: task.team,
+            actionUrl,
+        });
+    };
+
+    if (assignmentChanged) {
+        const type = previousState.assignee ? "task_reassigned" : "task_assigned";
+        if (currentAssigneeId) {
+            addTaskNotification(
+                currentAssigneeId,
+                type,
+                previousState.assignee ? "Task reassigned to you" : "Task assigned to you",
+                `You were assigned "${task.title}".`
+            );
+        }
+        if (previousState.assignee) {
+            addTaskNotification(
+                previousState.assignee,
+                "task_reassigned",
+                "Task reassigned",
+                `"${task.title}" was reassigned to someone else.`,
+                "/tasks"
+            );
+        }
+    }
+
+    if (previousState.status !== "completed" && task.status === "completed") {
+        addTaskNotification(
+            idString(task.createdBy),
+            "task_completed",
+            "Task completed",
+            `"${task.title}" was marked complete.`
+        );
+        addTaskNotification(
+            currentAssigneeId,
+            "task_completed",
+            "Task completed",
+            `"${task.title}" was marked complete.`
+        );
+    } else {
+        const detailsChanged =
+            previousState.title !== task.title ||
+            previousState.description !== task.description ||
+            previousState.priority !== task.priority ||
+            previousState.dueDate !== (task.dueDate?.getTime() ?? null);
+        if (detailsChanged) {
+            const recipient = currentAssigneeId !== actorId
+                ? currentAssigneeId
+                : idString(task.createdBy);
+            addTaskNotification(
+                recipient,
+                "task_updated",
+                "Task updated",
+                `"${task.title}" was updated.`
+            );
+        }
+    }
+
+    await createBulkNotifications(notifications);
+
     return res
         .status(200)
         .json(new ApiResponse(200, updatedTask, "Task updated successfully"));
@@ -611,6 +718,24 @@ const deleteTask = asyncHandler(async (req, res) => {
     }
 
     await task.deleteOne();
+
+    const recipients = new Set([
+        idString(task.createdBy),
+        idString(task.assignee),
+    ]);
+    recipients.delete(userId);
+    await createBulkNotifications(
+        [...recipients].filter(Boolean).map((recipient) => ({
+            recipient,
+            actor: req.user._id,
+            type: "task_updated",
+            title: "Task deleted",
+            message: `The task "${task.title}" was deleted.`,
+            relatedProject: task.project,
+            relatedTeam: task.team,
+            actionUrl: "/tasks",
+        }))
+    );
 
     return res
         .status(200)

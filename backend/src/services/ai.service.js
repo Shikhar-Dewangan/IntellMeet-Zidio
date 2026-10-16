@@ -1,274 +1,167 @@
-import OpenAI from "openai";
-
+// backend/services/ai.service.js
+import Groq from "groq-sdk";
 import ApiError from "../utils/ApiError.js";
 
-let openAIClient;
+let groqClient;
 
-const getOpenAIClient = () => {
-    if (!process.env.OPENAI_API_KEY) {
+const getGroqClient = () => {
+    if (!process.env.GROQ_API_KEY) {
         throw new ApiError(
             503,
-            "AI service is not configured"
+            "AI service is not configured (missing GROQ_API_KEY)"
         );
     }
-
-    openAIClient ||= new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
+    groqClient ||= new Groq({
+        apiKey: process.env.GROQ_API_KEY,
     });
-
-    return openAIClient;
+    return groqClient;
 };
 
+const AI_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+
+/**
+ * Generate meeting summary + action items from transcript
+ * using Groq in a SINGLE request.
+ *
+ * Returns:
+ *   {
+ *     summary: string,
+ *     actionItems: [{ title, description, owner, deadline }]
+ *   }
+ *
+ * Note: This function does NOT generate the transcript.
+ * The transcript comes from Deepgram (saved separately).
+ */
 const generateMeetingInsights = async ({
     transcript,
     meetingTitle = "",
     meetingDescription = "",
 }) => {
-    if (
-        typeof transcript !== "string" ||
-        transcript.trim().length < 10
-    ) {
-        throw new ApiError(
-            400,
-            "A usable meeting transcription is required"
-        );
+    if (typeof transcript !== "string" || transcript.trim().length < 10) {
+        throw new ApiError(400, "A usable meeting transcription is required");
     }
 
     try {
-        const response =
-            await getOpenAIClient()
-                .chat.completions.create({
-                    model:
-                        process.env.OPENAI_MODEL ||
-                        "gpt-4o-mini",
-
-                    response_format: {
-                        type: "json_object",
-                    },
-
-                    messages: [
-                        {
-                            role: "system",
-
-                            content: `
+        const response = await getGroqClient().chat.completions.create({
+            model: AI_MODEL,
+            temperature: 0.2,
+            response_format: { type: "json_object" },
+            messages: [
+                {
+                    role: "system",
+                    content: `
 You are an enterprise meeting intelligence system.
 
-Analyze the provided meeting transcript.
+Analyze the provided meeting transcript and return ONLY valid JSON.
 
-Return ONLY valid JSON.
-
-The JSON MUST contain exactly these top-level keys:
-
+The JSON MUST have exactly these two top-level keys:
 {
   "summary": "",
-  "keyPoints": [],
-  "decisions": [],
   "actionItems": []
 }
 
 Rules:
 
 1. SUMMARY
-- Give a concise factual summary.
-- Only use information present in the transcript.
-- Do not invent facts.
-- If the transcript does not contain enough meaningful information for a summary, return an empty string.
+- Provide a concise, factual summary of the meeting.
+- Use ONLY information that is explicitly present in the transcript.
+- If the transcript does not contain enough meaningful information for a summary, return an empty string "".
 
-2. KEY POINTS
-- Extract important topics actually discussed.
-- Do not invent topics.
-- Return an empty array if there are no meaningful key points.
-
-3. DECISIONS
-- Include only decisions explicitly made during the meeting.
-- Do not infer a decision from a suggestion.
-- Do not invent decisions.
-- Return an empty array if there were no explicit decisions.
-
-4. ACTION ITEMS
-- Include only explicit tasks, commitments, or follow-up actions.
-- Do not invent tasks.
-- Do not invent owners.
-- Do not invent due dates.
-- Each action item must be:
+2. ACTION ITEMS
+- Include ONLY explicit tasks, commitments, or follow-up actions that are stated in the transcript.
+- Do NOT invent tasks, owners, or deadlines.
+- Each action item MUST be:
   {
     "title": "",
-    "description": ""
+    "description": "",
+    "owner": "",
+    "deadline": ""
   }
-- Return an empty array if there are no actionable items.
+- "title" is REQUIRED and must be short (<= 200 chars).
+- "description" is optional; use "" if not described.
+- "owner" must be the person explicitly assigned or who committed to the task. If the transcript does NOT explicitly name an owner, use the exact string "Not assigned".
+- "deadline" must be a specific date/time or clear timeframe mentioned in the transcript. If no deadline is explicitly mentioned, use the exact string "Not specified".
+- Do NOT infer ownership from who spoke. Only assign an owner if the transcript clearly states it.
+- Return an empty array [] if there are no actionable items.
 
-5. OWNER HANDLING
-- Never guess who owns an action item.
-- Do not infer ownership from speaker identity.
-- User can assign the task later from the UI.
+3. HALLUCINATION
+- Never add information that is not supported by the transcript.
+- Never invent meeting attendees, decisions, or dates.
 
-6. LANGUAGE
-- Understand the transcript regardless of its language.
+4. LANGUAGE
+- Understand the transcript regardless of language.
 - Preserve the meaning of the original conversation.
 - Do not translate the entire transcript.
 
-7. HALLUCINATION
-- Never add information that is not supported by the transcript.
+Return only the JSON object, nothing else.
+                    `.trim(),
+                },
+                {
+                    role: "user",
+                    content: JSON.stringify({
+                        meetingTitle: meetingTitle.slice(0, 200),
+                        meetingDescription: meetingDescription.slice(0, 2000),
+                        transcript: transcript.slice(0, 80_000),
+                    }),
+                },
+            ],
+        });
 
-Return only JSON.
-                            `.trim(),
-                        },
-
-                        {
-                            role: "user",
-
-                            content:
-                                JSON.stringify({
-                                    meetingTitle:
-                                        meetingTitle
-                                            .slice(
-                                                0,
-                                                200
-                                            ),
-
-                                    meetingDescription:
-                                        meetingDescription
-                                            .slice(
-                                                0,
-                                                2000
-                                            ),
-
-                                    transcript:
-                                        transcript.slice(
-                                            0,
-                                            80_000
-                                        ),
-                                }),
-                        },
-                    ],
-                });
-
-        const content =
-            response
-                .choices?.[0]
-                ?.message
-                ?.content;
+        const content = response.choices?.[0]?.message?.content;
 
         let parsed;
-
         try {
-            parsed = JSON.parse(
-                content || "{}"
-            );
+            parsed = JSON.parse(content || "{}");
         } catch {
-            throw new Error(
-                "AI returned invalid JSON"
-            );
+            throw new ApiError(502, "AI returned invalid JSON");
         }
 
-        // Summary
+        // ============ SUMMARY ============
         const summary =
-            typeof parsed.summary ===
-            "string"
-                ? parsed.summary.trim()
+            typeof parsed.summary === "string"
+                ? parsed.summary.trim().slice(0, 10_000)
                 : "";
 
-        // Key Points
-        const keyPoints =
-            Array.isArray(
-                parsed.keyPoints
-            )
-                ? parsed.keyPoints
-                      .filter(
-                          (point) =>
-                              typeof point ===
-                                  "string" &&
-                              point.trim()
-                      )
-                      .map((point) =>
-                          point.trim()
-                      )
-                      .slice(0, 30)
-                : [];
+        // ============ ACTION ITEMS ============
+        const actionItems = Array.isArray(parsed.actionItems)
+            ? parsed.actionItems
+                  .filter(
+                      (item) =>
+                          item &&
+                          typeof item.title === "string" &&
+                          item.title.trim().length > 0
+                  )
+                  .map((item) => {
+                      const ownerRaw =
+                          typeof item.owner === "string"
+                              ? item.owner.trim()
+                              : "";
+                      const deadlineRaw =
+                          typeof item.deadline === "string"
+                              ? item.deadline.trim()
+                              : "";
 
-        // Decisions
-        const decisions =
-            Array.isArray(
-                parsed.decisions
-            )
-                ? parsed.decisions
-                      .filter(
-                          (decision) =>
-                              typeof decision ===
-                                  "string" &&
-                              decision.trim()
-                      )
-                      .map((decision) =>
-                          decision.trim()
-                      )
-                      .slice(0, 30)
-                : [];
-
-        // Action Items
-        const actionItems =
-            Array.isArray(
-                parsed.actionItems
-            )
-                ? parsed.actionItems
-                      .filter(
-                          (item) =>
-                              item &&
-                              typeof item.title ===
-                                  "string" &&
-                              item.title.trim()
-                      )
-                      .map((item) => ({
-                          title:
-                              item.title
-                                  .trim()
-                                  .slice(
-                                      0,
-                                      200
-                                  ),
-
+                      return {
+                          title: item.title.trim().slice(0, 200),
                           description:
-                              typeof item.description ===
-                              "string"
-                                  ? item.description
-                                        .trim()
-                                        .slice(
-                                            0,
-                                            2000
-                                        )
+                              typeof item.description === "string"
+                                  ? item.description.trim().slice(0, 2000)
                                   : "",
-                      }))
-                      .slice(0, 100)
-                : [];
+                          owner: ownerRaw || "Not assigned",
+                          deadline: deadlineRaw || "Not specified",
+                      };
+                  })
+                  .slice(0, 100)
+            : [];
 
-        return {
-            summary: summary.slice(
-                0,
-                10_000
-            ),
-
-            keyPoints,
-
-            decisions,
-
-            actionItems,
-        };
+        return { summary, actionItems };
     } catch (error) {
-        if (error.statusCode) {
-            throw error;
-        }
+        if (error.statusCode) throw error;
 
-        console.error(
-            "Meeting insight generation failed:",
-            error.message
-        );
+        console.error("Meeting insight generation failed:", error.message);
 
-        throw new ApiError(
-            502,
-            "Unable to generate meeting insights"
-        );
+        throw new ApiError(502, "Unable to generate meeting insights");
     }
 };
 
-export {
-    generateMeetingInsights,
-};
+export { generateMeetingInsights, AI_MODEL };

@@ -32,7 +32,6 @@ import {
   deleteMeeting,
   endMeeting,
   getMeetingById,
-  joinMeeting,
   leaveMeeting,
   startMeeting,
   updateMeeting,
@@ -526,11 +525,13 @@ export default function MeetingDetails() {
               </button>
             )}
 
-            {/* JOIN: host when scheduled/live, OR participant when live */}
+            {/* Open the room directly. The room handles participant presence,
+                so do not call joinMeeting here and attempt to add an existing
+                participant a second time. */}
             {(isLive || (isHost && isScheduled)) && (
               <button
                 type="button"
-                onClick={() => action(joinMeeting, "Joined meeting")}
+                onClick={() => navigate(`/meetings/${meetingId}/room`)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent-blue hover:bg-accent-blue/90 text-white text-xs font-semibold transition shadow-lg shadow-accent-blue/25"
               >
                 <Video className="w-3.5 h-3.5" />

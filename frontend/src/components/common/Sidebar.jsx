@@ -9,7 +9,7 @@ import {
   ListChecks,
   BarChart3,
   Bell,
-  User,
+  Sparkles,
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
@@ -23,6 +23,7 @@ const navItems = [
   { name: "Teams", to: "/teams", icon: Users },
   { name: "Projects", to: "/projects", icon: FolderKanban },
   { name: "Tasks", to: "/tasks", icon: ListChecks },
+  { name: "AI Insights", to: "/ai-insights", icon: Sparkles },
   { name: "Analytics", to: "/analytics", icon: BarChart3 },
   { name: "Notifications", to: "/notifications", icon: Bell },
   { name: "Settings", to: "/settings", icon: Settings },
@@ -34,9 +35,8 @@ export default function Sidebar({ unreadNotificationCount = 0 }) {
 
   return (
     <aside
-      className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-line bg-page transition-all duration-200 lg:flex ${
-        isSidebarOpen ? "w-64" : "w-20"
-      }`}
+      className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-line bg-page transition-all duration-200 lg:flex ${isSidebarOpen ? "w-64" : "w-20"
+        }`}
     >
       {/* Logo — top */}
       <div className="flex h-16 shrink-0 items-center border-b border-line px-4">
@@ -66,14 +66,12 @@ export default function Sidebar({ unreadNotificationCount = 0 }) {
                   to={item.to}
                   title={!isSidebarOpen ? item.name : undefined}
                   className={({ isActive }) =>
-                    `group relative flex items-center gap-3 rounded-xl text-sm font-medium transition ${
-                      isSidebarOpen
-                        ? "px-3 py-2.5"
-                        : "justify-center px-2 py-2.5"
-                    } ${
-                      isActive
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    `group relative flex items-center gap-3 rounded-xl text-sm font-medium transition ${isSidebarOpen
+                      ? "px-3 py-2.5"
+                      : "justify-center px-2 py-2.5"
+                    } ${isActive
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
+                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     }`
                   }
                 >
@@ -104,9 +102,8 @@ export default function Sidebar({ unreadNotificationCount = 0 }) {
       <div className="shrink-0 border-t border-line p-3">
         <button
           onClick={() => dispatch(toggleSidebar())}
-          className={`flex items-center gap-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition w-full ${
-            isSidebarOpen ? "px-3 py-2.5" : "justify-center px-2 py-2.5"
-          }`}
+          className={`flex items-center gap-3 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition w-full ${isSidebarOpen ? "px-3 py-2.5" : "justify-center px-2 py-2.5"
+            }`}
           aria-label="Toggle sidebar"
         >
           {isSidebarOpen ? (

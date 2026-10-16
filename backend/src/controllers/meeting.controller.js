@@ -10,8 +10,10 @@ import {
     scheduleHostInactivityEnd,
     clearHostInactivityEnd,
 } from "../services/meeting.service.js";
-import { createNotification } from "../services/notification.service.js";
-import { processMeetingAI } from "../services/aiInsight.service.js";
+import {
+    createBulkNotifications,
+    createNotification,
+} from "../services/notification.service.js";
 import crypto from "crypto";
 import { isValidObjectId } from "mongoose";
 
@@ -242,6 +244,10 @@ const updateMeeting = asyncHandler(async (req, res) => {
         );
     }
 
+    const previousTitle = meeting.title;
+    const previousDescription = meeting.description;
+    const previousScheduledAt = meeting.scheduledAt?.getTime();
+
     // Title
     if (title !== undefined) {
         if (!title.trim()) {
@@ -306,6 +312,31 @@ const updateMeeting = asyncHandler(async (req, res) => {
         Meeting.findById(meeting._id)
     );
 
+    if (
+        previousTitle !== meeting.title ||
+        previousDescription !== meeting.description ||
+        previousScheduledAt !== meeting.scheduledAt?.getTime()
+    ) {
+        const recipientIds = new Set([
+            ...meeting.participants.map((participant) => participant.toString()),
+            ...meeting.invitedUsers
+                .filter((invitation) => invitation.status !== "rejected")
+                .map((invitation) => invitation.user.toString()),
+        ]);
+        recipientIds.delete(req.user._id.toString());
+        await createBulkNotifications(
+            [...recipientIds].map((recipient) => ({
+                recipient,
+                actor: req.user._id,
+                type: "meeting_updated",
+                title: "Meeting updated",
+                message: `"${meeting.title}" details or schedule were updated.`,
+                relatedMeeting: meeting._id,
+                actionUrl: `/meetings/${meeting._id}`,
+            }))
+        );
+    }
+
     return res.status(200).json(
         new ApiResponse(
             200,
@@ -360,6 +391,25 @@ const deleteMeeting = asyncHandler(async (req, res) => {
     await Meeting.findByIdAndDelete(meetingId);
 
     clearHostInactivityEnd(meetingId);
+
+    if (meeting.status === "scheduled") {
+        const recipientIds = new Set(
+            meeting.invitedUsers
+                .filter((invitation) => invitation.status !== "rejected")
+                .map((invitation) => invitation.user.toString())
+        );
+        recipientIds.delete(req.user._id.toString());
+        await createBulkNotifications(
+            [...recipientIds].map((recipient) => ({
+                recipient,
+                actor: req.user._id,
+                type: "meeting_cancelled",
+                title: "Meeting cancelled",
+                message: `The scheduled meeting "${meeting.title}" was cancelled.`,
+                actionUrl: "/meetings",
+            }))
+        );
+    }
 
     return res.status(200).json(
         new ApiResponse(
@@ -631,28 +681,6 @@ const endMeeting = asyncHandler(async (req, res) => {
             req.user._id.toString(),
     });
 
-    /*
-     * AI is intentionally NOT dependent
-     * on recording or live captions.
-     *
-     * Transcript is generated continuously
-     * during the meeting.
-     *
-     * AI starts after meeting completion.
-     *
-     * Do not await this here because the user
-     * should not wait for OpenAI before receiving
-     * the meeting-ended response.
-     */
-    void processMeetingAI(
-        meeting._id
-    ).catch((error) => {
-        console.error(
-            "Background meeting AI processing failed:",
-            error.message
-        );
-    });
-
     const endedMeeting =
         await Meeting.findById(
             meeting._id
@@ -781,10 +809,12 @@ const inviteUsersToMeeting = asyncHandler(async (req, res) => {
         const notificationPromises = newInvitations.map((invitation) =>
             createNotification({
                 recipient: invitation.user,
+                actor: req.user._id,
                 type: "meeting_invitation",
                 title: "Meeting Invitation",
                 message: `${hostName} invited you to "${meeting.title}"`,
                 relatedMeeting: meeting._id,
+                actionUrl: `/meetings/${meeting._id}`,
             }),
         );
         await Promise.all(notificationPromises);
@@ -861,10 +891,12 @@ const acceptMeetingInvitation = asyncHandler(async (req, res) => {
         const inviteeName = req.user.fullName || req.user.email || "A user";
         await createNotification({
             recipient: meeting.host,
-            type: "meeting_invitation",
+            actor: req.user._id,
+            type: "meeting_invitation_accepted",
             title: "Invitation Accepted",
             message: `${inviteeName} accepted your invitation to "${meeting.title}"`,
             relatedMeeting: meeting._id,
+            actionUrl: `/meetings/${meeting._id}`,
         });
     } catch (err) {
         console.error("Failed to notify host:", err.message);
@@ -928,10 +960,12 @@ const rejectMeetingInvitation = asyncHandler(async (req, res) => {
         const inviteeName = req.user.fullName || req.user.email || "A user";
         await createNotification({
             recipient: meeting.host,
-            type: "meeting_invitation",
+            actor: req.user._id,
+            type: "meeting_invitation_rejected",
             title: "Invitation Declined",
             message: `${inviteeName} declined your invitation to "${meeting.title}"`,
             relatedMeeting: meeting._id,
+            actionUrl: `/meetings/${meeting._id}`,
         });
     } catch (err) {
         console.error("Failed to notify host (reject):", err.message);
@@ -968,4 +1002,3 @@ export {
     acceptMeetingInvitation,
     rejectMeetingInvitation,
 };
-

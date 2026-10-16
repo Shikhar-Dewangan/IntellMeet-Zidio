@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Meeting from "../models/meeting.model.js";
 import ApiError from "../utils/ApiError.js";
 import { processMeetingAI } from "./aiInsight.service.js";
+import { createBulkNotifications } from "./notification.service.js";
 
 const hostInactivityTimers = new Map();
 
@@ -51,8 +52,8 @@ const getMeeting = async (meetingId) => {
  * 4. Save AIInsight
  * 5. Send notification
  */
-const triggerMeetingAI = (meetingId) => {
-    void processMeetingAI(meetingId).catch(
+const triggerMeetingAI = (meetingId, triggeredBy = null) => {
+    void processMeetingAI(meetingId, { triggeredBy }).catch(
         (error) => {
             console.error(
                 "Meeting AI processing failed:",
@@ -103,6 +104,22 @@ const startMeetingLifecycle = async (
     meeting.lastActivityAt = new Date();
 
     await meeting.save();
+
+    const hostIdString = hostId.toString();
+    const recipients = [
+        ...new Set(meeting.participants.map((participant) => participant.toString())),
+    ].filter((participantId) => participantId !== hostIdString);
+    await createBulkNotifications(
+        recipients.map((recipient) => ({
+            recipient,
+            actor: hostId,
+            type: "meeting_started",
+            title: "Meeting started",
+            message: `"${meeting.title}" has started.`,
+            relatedMeeting: meeting._id,
+            actionUrl: `/meetings/${meeting._id}/room`,
+        }))
+    );
 
     clearHostInactivityEnd(meetingId);
 
@@ -179,6 +196,22 @@ const endMeetingLifecycle = async (
 
     await meeting.save();
 
+    const actorId = hostId?.toString();
+    const recipients = [
+        ...new Set(meeting.participants.map((participant) => participant.toString())),
+    ].filter((participantId) => !actorId || participantId !== actorId);
+    await createBulkNotifications(
+        recipients.map((recipient) => ({
+            recipient,
+            actor: hostId || null,
+            type: "meeting_ended",
+            title: "Meeting ended",
+            message: `"${meeting.title}" has ended.`,
+            relatedMeeting: meeting._id,
+            actionUrl: `/meetings/${meeting._id}`,
+        }))
+    );
+
     clearHostInactivityEnd(meetingId);
 
     /*
@@ -191,7 +224,7 @@ const endMeetingLifecycle = async (
      * If recording does not exist:
      * persisted live transcript is used.
      */
-    triggerMeetingAI(meeting._id);
+    triggerMeetingAI(meeting._id, hostId);
 
     return meeting;
 };

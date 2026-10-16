@@ -7,10 +7,10 @@ import {
   PlayCircle,
   Users,
   FolderKanban,
+  Sparkles,
   ListChecks,
   BarChart3,
   Bell,
-  User,
   Settings,
   X,
 } from "lucide-react";
@@ -23,6 +23,7 @@ const navItems = [
   { name: "Teams", to: "/teams", icon: Users },
   { name: "Projects", to: "/projects", icon: FolderKanban },
   { name: "Tasks", to: "/tasks", icon: ListChecks },
+  { name: "AI Insights", to: "/ai-insights", icon: Sparkles },
   { name: "Analytics", to: "/analytics", icon: BarChart3 },
   { name: "Notifications", to: "/notifications", icon: Bell },
   { name: "Settings", to: "/settings", icon: Settings },
@@ -50,9 +51,8 @@ export default function MobileSidebar({ unreadNotificationCount = 0 }) {
       )}
 
       <aside
-        className={`fixed left-0 top-0 z-50 flex h-full w-72 transform flex-col border-r border-line bg-page transition-transform duration-300 lg:hidden ${
-          isOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={`fixed left-0 top-0 z-50 flex h-full w-72 transform flex-col border-r border-line bg-page transition-transform duration-300 lg:hidden ${isOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
       >
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-line px-4">
           <div className="flex items-center gap-2.5">
@@ -82,10 +82,9 @@ export default function MobileSidebar({ unreadNotificationCount = 0 }) {
                     to={item.to}
                     onClick={close}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
-                        isActive
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
-                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition ${isActive
+                        ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                       }`
                     }
                   >

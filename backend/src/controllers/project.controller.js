@@ -12,6 +12,7 @@ import {
     deleteFileFromCloudinary,
 } from "../utils/FileUplode.js";
 import { canManageProject } from "../utils/projectAuth.util.js";
+import { createBulkNotifications } from "../services/notification.service.js";
 
 /* ============================================================
    CONSTANTS
@@ -233,6 +234,34 @@ const populateProject = (query) =>
         .populate("teams", "name description owner members")
         .populate("files.uploadedBy", "fullName email avatar");
 
+const notifyProjectCollaborators = async (
+    project,
+    actor,
+    { type = "project_updated", title, message, deleted = false }
+) => {
+    const teams = await Team.find({ _id: { $in: project.teams || [] } })
+        .select("members")
+        .lean();
+    const actorId = actor.toString();
+    const recipients = new Set([
+        ...(project.members || []).map((memberId) => memberId.toString()),
+        ...teams.flatMap((team) => team.members.map(String)),
+    ]);
+    recipients.delete(actorId);
+
+    await createBulkNotifications(
+        [...recipients].map((recipient) => ({
+            recipient,
+            actor,
+            type,
+            title,
+            message,
+            relatedProject: deleted ? null : project._id,
+            actionUrl: deleted ? "/projects" : `/projects/${project._id}`,
+        }))
+    );
+};
+
 /**
  * Upload an array of Multer files to Cloudinary.
  * Returns array of file metadata objects ready for `project.files.push(...)`.
@@ -392,6 +421,14 @@ const createProject = asyncHandler(async (req, res) => {
         visibleTeamIds.includes(t._id.toString())
     );
 
+    if (validTeamIds?.length) {
+        await notifyProjectCollaborators(project, req.user._id, {
+            type: "project_member_added",
+            title: "Project added to your team",
+            message: `"${project.name}" was added to one of your teams.`,
+        });
+    }
+
     return res
         .status(201)
         .json(new ApiResponse(201, response, "Project created successfully"));
@@ -518,6 +555,16 @@ const updateProject = asyncHandler(async (req, res) => {
 
     const isOwner = project.owner.toString() === req.user._id.toString();
     const isAdmin = req.user.role === "admin";
+    const previousState = {
+        name: project.name,
+        description: project.description,
+        status: project.status,
+        priority: project.priority,
+        startDate: project.startDate?.getTime() ?? null,
+        dueDate: project.dueDate?.getTime() ?? null,
+        repositoryUrl: project.repositoryUrl,
+    };
+    const previousTeamIds = project.teams.map((teamId) => teamId.toString());
 
     if (!isOwner && !isAdmin) {
         // Not project owner, not admin → allow only if user can manage
@@ -609,6 +656,96 @@ const updateProject = asyncHandler(async (req, res) => {
         visibleTeamIds.includes(t._id.toString())
     );
 
+    const currentTeamIds = project.teams.map((teamId) => teamId.toString());
+    const addedTeamIds = currentTeamIds.filter((teamId) => !previousTeamIds.includes(teamId));
+    const removedTeamIds = previousTeamIds.filter((teamId) => !currentTeamIds.includes(teamId));
+    const changedDetails =
+        previousState.name !== project.name ||
+        previousState.description !== project.description ||
+        previousState.status !== project.status ||
+        previousState.priority !== project.priority ||
+        previousState.startDate !== (project.startDate?.getTime() ?? null) ||
+        previousState.dueDate !== (project.dueDate?.getTime() ?? null) ||
+        previousState.repositoryUrl !== project.repositoryUrl;
+
+    const [addedTeams, removedTeams, currentTeams] = await Promise.all([
+        Team.find({ _id: { $in: addedTeamIds } }).select("members").lean(),
+        Team.find({ _id: { $in: removedTeamIds } }).select("members").lean(),
+        Team.find({ _id: { $in: currentTeamIds } }).select("members").lean(),
+    ]);
+    const notifications = [];
+    const notifiedRecipients = new Set();
+    const notifiedRecipientIds = new Set();
+    const addTeamNotifications = (teams, type, title, message) => {
+        for (const team of teams) {
+            for (const memberId of team.members) {
+                const recipient = memberId.toString();
+                const notificationKey = `${recipient}:${type}`;
+                if (
+                    recipient === req.user._id.toString() ||
+                    notifiedRecipients.has(notificationKey)
+                ) {
+                    continue;
+                }
+                notifiedRecipients.add(notificationKey);
+                notifiedRecipientIds.add(recipient);
+                notifications.push({
+                    recipient,
+                    actor: req.user._id,
+                    type,
+                    title,
+                    message,
+                    relatedProject: project._id,
+                    actionUrl: type === "project_member_removed"
+                        ? "/projects"
+                        : `/projects/${project._id}`,
+                });
+            }
+        }
+    };
+
+    addTeamNotifications(
+        addedTeams,
+        "project_member_added",
+        "Project added to your team",
+        `"${project.name}" was added to one of your teams.`
+    );
+    addTeamNotifications(
+        removedTeams,
+        "project_member_removed",
+        "Project removed from your team",
+        `"${project.name}" was removed from one of your teams.`
+    );
+
+    if (changedDetails) {
+        const currentMembers = new Set([
+            ...project.members.map((memberId) => memberId.toString()),
+            ...currentTeams.flatMap((team) => team.members.map(String)),
+        ]);
+        for (const recipient of currentMembers) {
+            const notificationKey = `${recipient}:project_updated`;
+            if (
+                recipient === req.user._id.toString() ||
+                notifiedRecipientIds.has(recipient) ||
+                notifiedRecipients.has(notificationKey)
+            ) {
+                continue;
+            }
+            notifiedRecipients.add(notificationKey);
+            notifications.push({
+                recipient,
+                actor: req.user._id,
+                type: "project_updated",
+                title: "Project updated",
+                message: `"${project.name}" was updated by ${req.user.fullName || "a team member"}.`,
+                relatedProject: project._id,
+                actionUrl: `/projects/${project._id}`,
+            });
+        }
+    }
+
+    await createBulkNotifications(notifications);
+
     return res
         .status(200)
         .json(new ApiResponse(200, response, "Project updated successfully"));
@@ -691,6 +828,11 @@ const addProjectFiles = asyncHandler(async (req, res) => {
         throw new ApiError(500, "Could not save project files");
     }
 
+    await notifyProjectCollaborators(project, req.user._id, {
+        title: "Project files updated",
+        message: `Files were added to "${project.name}".`,
+    });
+
     const populated = await populateProject(Project.findById(project._id));
     return res
         .status(200)
@@ -757,6 +899,10 @@ const deleteProjectFile = asyncHandler(async (req, res) => {
     }
 
     const populated = await populateProject(Project.findById(project._id));
+    await notifyProjectCollaborators(project, req.user._id, {
+        title: "Project files updated",
+        message: `"${target.name}" was removed from "${project.name}".`,
+    });
     return res
         .status(200)
         .json(new ApiResponse(200, populated, "File deleted successfully"));
@@ -853,6 +999,11 @@ const replaceProjectFile = asyncHandler(async (req, res) => {
         );
     });
 
+    await notifyProjectCollaborators(project, req.user._id, {
+        title: "Project files updated",
+        message: `"${oldFile.name}" was replaced in "${project.name}".`,
+    });
+
     const populated = await populateProject(Project.findById(project._id));
     return res
         .status(200)
@@ -920,6 +1071,12 @@ const deleteProject = asyncHandler(async (req, res) => {
     }
 
     await project.deleteOne();
+
+    await notifyProjectCollaborators(project, req.user._id, {
+        title: "Project deleted",
+        message: `The project "${project.name}" was deleted.`,
+        deleted: true,
+    });
 
     return res.status(200).json(
         new ApiResponse(

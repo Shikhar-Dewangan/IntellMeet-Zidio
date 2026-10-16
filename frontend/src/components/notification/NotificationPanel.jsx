@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Bell, CheckCheck, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -14,7 +14,9 @@ import NotificationItem from "./NotificationItem.jsx";
 export default function NotificationPanel({ open, onClose, socketRef }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [markingAll, setMarkingAll] = useState(false);
   const panelRef = useRef(null);
+  const navigate = useNavigate();
 
   /* ============ FETCH ============ */
   useEffect(() => {
@@ -78,14 +80,26 @@ export default function NotificationPanel({ open, onClose, socketRef }) {
   };
 
   const markAll = async () => {
+    if (markingAll || unread === 0) return;
+    setMarkingAll(true);
     try {
       await markAllNotificationsAsRead();
       setNotifications((items) => items.map((i) => ({ ...i, isRead: true })));
       window.dispatchEvent(new Event("notifications:updated"));
       toast.success("All marked as read");
     } catch (err) {
-      toast.error(getApiError(err, "Could not update"));
+      toast.error(getApiError(err, "Could not mark notifications as read"));
+    } finally {
+      setMarkingAll(false);
     }
+  };
+
+  const handleViewAll = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // Navigate before closing the popover so the route change is never lost.
+    navigate("/notifications");
+    onClose?.();
   };
 
   const remove = async (id) => {
@@ -105,6 +119,9 @@ export default function NotificationPanel({ open, onClose, socketRef }) {
   return (
     <div
       ref={panelRef}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      data-notification-panel="true"
       className="absolute right-0 top-full mt-2 z-50 w-90 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-card shadow-2xl overflow-hidden"
     >
       {/* Header */}
@@ -119,11 +136,13 @@ export default function NotificationPanel({ open, onClose, socketRef }) {
         </div>
         {unread > 0 && (
           <button
-            onClick={markAll}
-            className="inline-flex items-center gap-1 text-xs font-medium text-accent-600 dark:text-accent-400 hover:underline"
+            type="button"
+            onClick={(event) => { event.preventDefault(); event.stopPropagation(); markAll(); }}
+            disabled={markingAll}
+            className="inline-flex items-center gap-1 text-xs font-medium text-accent-600 dark:text-accent-400 hover:underline disabled:opacity-50"
           >
             <CheckCheck className="h-3 w-3" />
-            Mark all
+            {markingAll ? "Marking..." : "Mark all"}
           </button>
         )}
       </div>
@@ -151,6 +170,7 @@ export default function NotificationPanel({ open, onClose, socketRef }) {
               notification={n}
               onMarkRead={markRead}
               onDelete={remove}
+              onNavigate={onClose}
               compact
             />
           ))
@@ -159,13 +179,13 @@ export default function NotificationPanel({ open, onClose, socketRef }) {
 
       {/* Footer */}
       <div className="border-t border-line p-2">
-        <Link
-          to="/notifications"
-          onClick ={navigate => navigate("/notifications")}
+        <button
+          type="button"
+          onClick={handleViewAll}
           className="block w-full text-center rounded-lg py-2 text-xs font-semibold text-accent-600 dark:text-accent-400 hover:bg-surface transition"
         >
           View all notifications
-        </Link>
+        </button>
       </div>
     </div>
   );

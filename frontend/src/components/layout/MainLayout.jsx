@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import { getUnreadNotifications } from "../../services/notification.service.js";
-import { unwrapApiList } from "../../utils/apiData.js";
+import { getUnreadNotificationCount } from "../../services/notification.service.js";
+import { unwrapApiData } from "../../utils/apiData.js";
 import Sidebar from "../common/Sidebar.jsx";
 import MobileSidebar from "../common/MobileSidebar.jsx";
 import Header from "../common/Header.jsx";
@@ -13,8 +13,8 @@ export default function MainLayout() {
 
   const refreshUnreadNotifications = useCallback(async () => {
     try {
-      const response = await getUnreadNotifications();
-      setUnreadNotificationCount(unwrapApiList(response).length);
+      const response = await getUnreadNotificationCount();
+      setUnreadNotificationCount(unwrapApiData(response)?.count ?? 0);
     } catch {
       setUnreadNotificationCount(0);
     }

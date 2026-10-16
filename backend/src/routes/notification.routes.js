@@ -4,6 +4,7 @@ import {
     getNotificationById,
     getMyNotifications,
     getUnreadNotifications,
+    getUnreadNotificationCount,
     markNotificationAsRead,
     markAllNotificationsAsRead,
     deleteNotification,
@@ -16,6 +17,7 @@ const router = Router();
 router.use(verifyJWT);
 
 router.get("/", getMyNotifications);
+router.get("/unread/count", getUnreadNotificationCount);
 router.get("/unread", getUnreadNotifications);
 router.get("/:notificationId", getNotificationById);
 

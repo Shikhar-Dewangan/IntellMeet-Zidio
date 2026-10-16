@@ -1,12 +1,17 @@
 import api from "./api.js";
 
-export const getMyNotifications = async () => {
-  const response = await api.get("/notifications");
+export const getMyNotifications = async (params = {}) => {
+  const response = await api.get("/notifications", { params });
   return response.data;
 };
 
-export const getUnreadNotifications = async () => {
-  const response = await api.get("/notifications/unread");
+export const getUnreadNotifications = async (params = {}) => {
+  const response = await api.get("/notifications/unread", { params });
+  return response.data;
+};
+
+export const getUnreadNotificationCount = async () => {
+  const response = await api.get("/notifications/unread/count");
   return response.data;
 };
 

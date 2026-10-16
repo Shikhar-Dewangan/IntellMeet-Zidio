@@ -11,6 +11,7 @@ import TeamTaskOwner from "../models/teamTaskOwner.model.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
+import { createBulkNotifications, createNotification } from "../services/notification.service.js";
 
 /* ============================================================
    Helpers
@@ -315,6 +316,19 @@ const deleteTeam = asyncHandler(async (req, res) => {
         throw new ApiError(500, "Failed to delete team");
     }
 
+    await createBulkNotifications(
+        team.members
+            .filter((memberId) => memberId.toString() !== req.user._id.toString())
+            .map((recipient) => ({
+                recipient,
+                actor: req.user._id,
+                type: "team_member_removed",
+                title: "Team deleted",
+                message: `The "${team.name}" team was deleted.`,
+                actionUrl: "/teams",
+            }))
+    );
+
     return res
         .status(200)
         .json(new ApiResponse(200, null, "Team deleted successfully"));
@@ -367,6 +381,18 @@ const addMember = asyncHandler(async (req, res) => {
     const updatedTeam = await Team.findById(team._id)
         .populate("owner", "fullName email avatar role")
         .populate("members", "fullName email avatar role");
+
+    if (user._id.toString() !== req.user._id.toString()) {
+        await createNotification({
+            recipient: user._id,
+            actor: req.user._id,
+            type: "team_member_added",
+            title: "Added to a team",
+            message: `${req.user.fullName || "A team manager"} added you to "${team.name}".`,
+            relatedTeam: team._id,
+            actionUrl: `/teams/${team._id}`,
+        });
+    }
 
     return res
         .status(200)
@@ -443,6 +469,17 @@ const removeMember = asyncHandler(async (req, res) => {
     const updatedTeam = await Team.findById(team._id)
         .populate("owner", "fullName email avatar role")
         .populate("members", "fullName email avatar role");
+
+    if (userId.toString() !== req.user._id.toString()) {
+        await createNotification({
+            recipient: userId,
+            actor: req.user._id,
+            type: "team_member_removed",
+            title: "Removed from a team",
+            message: `You were removed from "${team.name}".`,
+            actionUrl: "/teams",
+        });
+    }
 
     return res
         .status(200)
@@ -529,6 +566,18 @@ const grantProjectOwner = asyncHandler(async (req, res) => {
         .populate("user", "fullName email avatar role")
         .populate("grantedBy", "fullName email avatar role");
 
+    if (targetUserId !== req.user._id.toString()) {
+        await createNotification({
+            recipient: targetUserId,
+            actor: req.user._id,
+            type: "project_owner_granted",
+            title: "Project Owner access granted",
+            message: `You were granted Project Owner access in "${team.name}".`,
+            relatedTeam: team._id,
+            actionUrl: `/teams/${team._id}`,
+        });
+    }
+
     return res
         .status(200)
         .json(
@@ -578,6 +627,18 @@ const revokeProjectOwner = asyncHandler(async (req, res) => {
     } catch (err) {
         console.error("revokeProjectOwner: delete failed", err);
         throw new ApiError(500, "Failed to revoke authorization");
+    }
+
+    if (userId.toString() !== req.user._id.toString()) {
+        await createNotification({
+            recipient: userId,
+            actor: req.user._id,
+            type: "project_owner_revoked",
+            title: "Project Owner access revoked",
+            message: `Your Project Owner access in "${team.name}" was revoked.`,
+            relatedTeam: team._id,
+            actionUrl: `/teams/${team._id}`,
+        });
     }
 
     return res

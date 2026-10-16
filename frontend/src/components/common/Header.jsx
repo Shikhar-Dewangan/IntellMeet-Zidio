@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import {
   Menu,
-  Search,
   Bell,
   ChevronDown,
   User as UserIcon,
@@ -18,9 +17,9 @@ import NotificationPanel from "../notification/NotificationPanel.jsx";
 import { setMobileSidebarOpen } from "../../store/slices/uiSlice.js";
 import { clearCredentials } from "../../store/slices/authSlice.js";
 import { logoutUser } from "../../services/auth.service.js";
-import { getUnreadNotifications } from "../../services/notification.service.js";
+import { getUnreadNotificationCount } from "../../services/notification.service.js";
 import GlobalSearch from "../search/GlobalSearch.jsx";
-import { unwrapApiList } from "../../utils/apiData.js";
+import { unwrapApiData } from "../../utils/apiData.js";
 import useSocket from "../../hooks/useSocket.js";
 import toast from "react-hot-toast";
 
@@ -108,9 +107,8 @@ export default function Header() {
   useEffect(() => {
     const fetchUnread = async () => {
       try {
-        const res = await getUnreadNotifications();
-        const list = unwrapApiList(res);
-        setUnreadCount(list.length);
+        const res = await getUnreadNotificationCount();
+        setUnreadCount(unwrapApiData(res)?.count ?? 0);
       } catch {
         // Silent fail
       }
@@ -120,12 +118,25 @@ export default function Header() {
 
     // Listen for updates (from mark-read / delete events)
     const handleUpdated = () => fetchUnread();
+    const handleFocus = () => fetchUnread();
     window.addEventListener("notifications:updated", handleUpdated);
+    window.addEventListener("focus", handleFocus);
 
     // Real-time socket listener
     const socket = socketRef?.current;
+    const seenNotificationIds = new Set();
     const handleNew = (payload) => {
-      setUnreadCount((c) => c + 1);
+      // The socket may be shared by multiple UI surfaces; avoid double-counting
+      // the same notification event if it is delivered more than once.
+      if (payload?._id) {
+        if (seenNotificationIds.has(payload._id)) return;
+        seenNotificationIds.add(payload._id);
+      }
+      if (!payload?.isRead) setUnreadCount((count) => count + 1);
+      window.dispatchEvent(
+        new CustomEvent("notifications:new", { detail: payload })
+      );
+      window.dispatchEvent(new Event("notifications:updated"));
       if (payload?.title) {
         toast(payload.title, { icon: "🔔" });
       }
@@ -136,6 +147,7 @@ export default function Header() {
 
     return () => {
       window.removeEventListener("notifications:updated", handleUpdated);
+      window.removeEventListener("focus", handleFocus);
       if (socket) socket.off("notification:new", handleNew);
     };
   }, [socketRef]);
@@ -193,7 +205,6 @@ export default function Header() {
             <NotificationPanel
               open={panelOpen}
               onClose={() => setPanelOpen(false)}
-              socketRef={socketRef}
             />
           </div>
 
@@ -277,7 +288,6 @@ export default function Header() {
                 <NotificationPanel
                   open={panelOpen}
                   onClose={() => setPanelOpen(false)}
-                  socketRef={socketRef}
                 />
               </div>
             )}
@@ -341,9 +351,6 @@ function DropdownContent({ user, onClose, onLogout }) {
         </MenuItem>
         <MenuItem to="/settings" icon={SettingsIcon} onClick={onClose}>
           Settings
-        </MenuItem>
-        <MenuItem to="/billing" icon={CreditCard} onClick={onClose}>
-          Billing
         </MenuItem>
         <MenuItem to="/help" icon={HelpCircle} onClick={onClose}>
           Help & Support

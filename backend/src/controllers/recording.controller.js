@@ -376,7 +376,8 @@ const processRecording = asyncHandler(
          * It does NOT make recording mandatory.
          */
         void processMeetingAI(
-            meeting._id
+            meeting._id,
+            { triggeredBy: req.user._id }
         ).catch((error) => {
             console.error(
                 "Unable to refresh meeting AI after recording transcription:",
