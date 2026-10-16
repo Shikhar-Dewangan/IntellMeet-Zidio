@@ -3,7 +3,7 @@ import store from "../store/store.js";
 import { clearCredentials } from "../store/slices/authSlice.js";
 
 const apiConfig = {
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1",
+  baseURL: import.meta.env.VITE_API_URL,
   withCredentials: true,
   timeout: 10000,
 };
