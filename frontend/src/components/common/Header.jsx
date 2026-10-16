@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import {
   Menu,
-  Search,
   Bell,
   ChevronDown,
   User as UserIcon,
@@ -14,21 +13,76 @@ import {
   Video,
 } from "lucide-react";
 import ThemeToggle from "./ThemeToggle.jsx";
+import NotificationPanel from "../notification/NotificationPanel.jsx";
 import { setMobileSidebarOpen } from "../../store/slices/uiSlice.js";
 import { clearCredentials } from "../../store/slices/authSlice.js";
 import { logoutUser } from "../../services/auth.service.js";
+import { getUnreadNotificationCount } from "../../services/notification.service.js";
+import GlobalSearch from "../search/GlobalSearch.jsx";
+import { unwrapApiData } from "../../utils/apiData.js";
+import useSocket from "../../hooks/useSocket.js";
 import toast from "react-hot-toast";
 
-export default function Header({ unreadNotificationCount = 0 }) {
+/* ============================================================
+   SHARED AVATAR COMPONENT
+   ============================================================ */
+function UserAvatar({ user, size = "md" }) {
+  const sizes = {
+    sm: "w-7 h-7 text-[10px]",
+    md: "w-9 h-9 text-sm",
+    lg: "w-10 h-10 text-sm",
+  };
+  const cls = sizes[size];
+  const name = user?.fullName || user?.name || "User";
+  const initial = name[0]?.toUpperCase() || "U";
+
+  if (user?.avatar) {
+    return (
+      <img
+        src={user.avatar}
+        alt={name}
+        className={`${cls} rounded-full object-cover shrink-0`}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`${cls} rounded-full bg-linear-to-br from-accent-purple to-accent-blue flex items-center justify-center text-white font-bold shrink-0`}
+    >
+      {initial}
+    </div>
+  );
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+export default function Header() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { user } = useSelector((s) => s.auth);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const dropdownRef = useRef(null);
 
+  // Dropdown + notification panel state
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Refs — desktop + mobile
+  const desktopDropdownRef = useRef(null);
+  const mobileDropdownRef = useRef(null);
+  const desktopPanelRef = useRef(null);
+  const mobilePanelRef = useRef(null);
+
+  // Socket
+  const socketRef = useSocket({ enabled: true });
+
+  /* ============ PROFILE DROPDOWN — CLOSE ON OUTSIDE CLICK ============ */
   useEffect(() => {
     const handler = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+      const inDesktop = desktopDropdownRef.current?.contains(e.target);
+      const inMobile = mobileDropdownRef.current?.contains(e.target);
+      if (!inDesktop && !inMobile) {
         setDropdownOpen(false);
       }
     };
@@ -36,10 +90,72 @@ export default function Header({ unreadNotificationCount = 0 }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  /* ============ NOTIFICATION PANEL — CLOSE ON OUTSIDE CLICK ============ */
+  useEffect(() => {
+    const handler = (e) => {
+      const inDesktop = desktopPanelRef.current?.contains(e.target);
+      const inMobile = mobilePanelRef.current?.contains(e.target);
+      if (!inDesktop && !inMobile) {
+        setPanelOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  /* ============ FETCH UNREAD COUNT + REAL-TIME SOCKET ============ */
+  useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const res = await getUnreadNotificationCount();
+        setUnreadCount(unwrapApiData(res)?.count ?? 0);
+      } catch {
+        // Silent fail
+      }
+    };
+
+    fetchUnread();
+
+    // Listen for updates (from mark-read / delete events)
+    const handleUpdated = () => fetchUnread();
+    const handleFocus = () => fetchUnread();
+    window.addEventListener("notifications:updated", handleUpdated);
+    window.addEventListener("focus", handleFocus);
+
+    // Real-time socket listener
+    const socket = socketRef?.current;
+    const seenNotificationIds = new Set();
+    const handleNew = (payload) => {
+      // The socket may be shared by multiple UI surfaces; avoid double-counting
+      // the same notification event if it is delivered more than once.
+      if (payload?._id) {
+        if (seenNotificationIds.has(payload._id)) return;
+        seenNotificationIds.add(payload._id);
+      }
+      if (!payload?.isRead) setUnreadCount((count) => count + 1);
+      window.dispatchEvent(
+        new CustomEvent("notifications:new", { detail: payload })
+      );
+      window.dispatchEvent(new Event("notifications:updated"));
+      if (payload?.title) {
+        toast(payload.title, { icon: "🔔" });
+      }
+    };
+    if (socket) {
+      socket.on("notification:new", handleNew);
+    }
+
+    return () => {
+      window.removeEventListener("notifications:updated", handleUpdated);
+      window.removeEventListener("focus", handleFocus);
+      if (socket) socket.off("notification:new", handleNew);
+    };
+  }, [socketRef]);
+
   const handleLogout = async () => {
     try {
       await logoutUser();
-    } catch (e) {
+    } catch {
       // ignore
     } finally {
       dispatch(clearCredentials());
@@ -49,158 +165,208 @@ export default function Header({ unreadNotificationCount = 0 }) {
   };
 
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-      <div className="relative flex items-center gap-3 sm:gap-4 px-4 sm:px-6 h-16">
-        {/* Mobile: hamburger + logo */}
-        <button
-          onClick={() => dispatch(setMobileSidebarOpen(true))}
-          className="lg:hidden p-2 -ml-1 rounded-lg hover:bg-slate-100 text-slate-600"
-          aria-label="Open menu"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
+    <header className="sticky top-0 z-30 bg-page border-b border-line">
+      {/* ================= DESKTOP (lg+) ================= */}
+      <div className="hidden lg:grid grid-cols-[auto_1fr_auto] items-center gap-6 px-6 h-16">
+        {/* LEFT: Theme toggle */}
+        <div className="flex items-center shrink-0">
+          <ThemeToggle />
+        </div>
 
-        {/* Mobile logo (desktop pe sidebar mein logo hai) */}
-        <Link
-          to="/dashboard"
-          className="lg:hidden flex items-center gap-2 shrink-0"
-        >
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/25">
-            <Video className="w-4 h-4 text-white" />
-          </div>
-          <span className="text-base font-bold text-slate-900">
-            IntelliMeet
-          </span>
-        </Link>
-
-        {/* Search */}
-        <div className="hidden lg:flex fixed left-1/2 top-8 z-40 w-[min(28vw,36rem)] -translate-x-1/2 -translate-y-1/2">
-          <div className="relative w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search meetings, notes, tasks, or projects..."
-              className="w-full pl-9 pr-14 py-2.5 rounded-xl bg-slate-100 border border-transparent focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:outline-none text-sm text-slate-800 placeholder-slate-400 transition"
-            />
-            <kbd className="hidden lg:flex items-center gap-0.5 absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded-md border border-slate-200 bg-white text-[10px] font-medium text-slate-400">
-              ⌘ K
-            </kbd>
+        {/* CENTER: Global search */}
+        <div className="flex justify-center">
+          <div className="w-full max-w-2xl xl:max-w-3xl">
+            <GlobalSearch placeholder="Search meetings, notes, tasks, or projects..." />
           </div>
         </div>
 
-        {/* Right side */}
-        <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
-          {/* Theme toggle */}
-          <div className="hidden sm:block">
-            <ThemeToggle />
+        {/* RIGHT: Notifications + Profile */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Notification bell + panel */}
+          <div className="relative" ref={desktopPanelRef}>
+            <button
+              type="button"
+              onClick={() => setPanelOpen((v) => !v)}
+              className="relative p-2 rounded-lg hover:bg-surface text-fg-2 transition"
+              aria-label={
+                unreadCount > 0
+                  ? `Notifications, ${unreadCount} unread`
+                  : "Notifications"
+              }
+            >
+              <Bell className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <span className="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-accent-rose text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-page">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            <NotificationPanel
+              open={panelOpen}
+              onClose={() => setPanelOpen(false)}
+            />
           </div>
 
-          {/* Notifications */}
-          <Link
-            to="/notifications"
-            className="relative p-2 rounded-lg hover:bg-slate-100 text-slate-600 transition"
-            aria-label={
-              unreadNotificationCount
-                ? `Notifications, ${unreadNotificationCount} unread`
-                : "Notifications"
-            }
-          >
-            <Bell className="w-5 h-5" />
-            {unreadNotificationCount > 0 && (
-              <span className="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white">
-                {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
-              </span>
-            )}
-          </Link>
-
-          <div className="hidden sm:block w-px h-7 bg-slate-200 mx-1" />
+          <div className="w-px h-7 bg-line mx-1" />
 
           {/* Profile dropdown */}
-          <div className="relative" ref={dropdownRef}>
+          <div className="relative" ref={desktopDropdownRef}>
             <button
               onClick={() => setDropdownOpen((v) => !v)}
-              className="flex items-center gap-2 p-1 pr-2 rounded-xl hover:bg-slate-100 transition"
+              className="flex items-center gap-2 p-1 pr-2 rounded-xl hover:bg-surface transition"
             >
-              <div className="w-9 h-9 rounded-full bg-linear-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                {user?.name?.charAt(0).toUpperCase() ||
-                  user?.fullName?.charAt(0).toUpperCase() ||
-                  "U"}
-              </div>
-              <div className="hidden md:block text-left leading-tight">
-                <p className="text-sm font-semibold text-slate-900 truncate max-w-30">
-                  {user?.name || user?.fullName || "User"}
-                </p>
-                <p className="text-[11px] text-slate-500 truncate max-w-30">
-                  Free Plan
+              <UserAvatar user={user} size="md" />
+              <div className="text-left leading-tight">
+                <p className="text-sm font-semibold text-fg truncate max-w-30">
+                  {user?.fullName || user?.name || "User"}
                 </p>
               </div>
-              <ChevronDown className="hidden md:block w-4 h-4 text-slate-400" />
+              <ChevronDown className="w-4 h-4 text-fg-3" />
             </button>
 
             {dropdownOpen && (
-              <div className="absolute right-0 mt-2 w-64 rounded-2xl bg-white border border-slate-200 shadow-xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-violet-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                    {user?.name?.charAt(0).toUpperCase() ||
-                      user?.fullName?.charAt(0).toUpperCase() ||
-                      "U"}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-900 truncate">
-                      {user?.name || user?.fullName || "User"}
-                    </p>
-                    <p className="text-xs text-slate-500 truncate">
-                      {user?.email || "user@example.com"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="py-1">
-                  <MenuItem
-                    to="/profile"
-                    icon={UserIcon}
-                    onClick={() => setDropdownOpen(false)}
-                  >
-                    Profile
-                  </MenuItem>
-                  <MenuItem
-                    to="/settings"
-                    icon={SettingsIcon}
-                    onClick={() => setDropdownOpen(false)}
-                  >
-                    Settings
-                  </MenuItem>
-                  <MenuItem
-                    to="/billing"
-                    icon={CreditCard}
-                    onClick={() => setDropdownOpen(false)}
-                  >
-                    Billing
-                  </MenuItem>
-                  <MenuItem
-                    to="/help"
-                    icon={HelpCircle}
-                    onClick={() => setDropdownOpen(false)}
-                  >
-                    Help & Support
-                  </MenuItem>
-                </div>
-
-                <div className="border-t border-slate-100">
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Logout
-                  </button>
-                </div>
+              <div
+                className="absolute right-0 top-full mt-2 z-50 w-64 rounded-2xl bg-card border border-line shadow-xl overflow-hidden"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <DropdownContent
+                  user={user}
+                  onClose={() => setDropdownOpen(false)}
+                  onLogout={handleLogout}
+                />
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* ================= MOBILE + TABLET (< lg) ================= */}
+      <div className="lg:hidden relative flex items-center gap-2 px-4 h-14">
+        <button
+          onClick={() => dispatch(setMobileSidebarOpen(true))}
+          className="p-2 -ml-1 rounded-lg hover:bg-surface text-fg-2"
+          aria-label="Open menu"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        <Link to="/dashboard" className="flex items-center gap-2 shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-linear-to-br from-accent-purple to-accent-blue flex items-center justify-center shadow-lg shadow-accent-purple/30">
+            <Video className="w-4 h-4 text-white" />
+          </div>
+          <span className="hidden min-[400px]:inline text-base font-bold text-fg">
+            IntelliMeet
+          </span>
+        </Link>
+
+        <div className="flex items-center gap-1 ml-auto">
+          <ThemeToggle />
+
+          {/* Notification bell + panel */}
+          <div className="relative" ref={mobilePanelRef}>
+            <button
+              type="button"
+              onClick={() => setPanelOpen((v) => !v)}
+              className="relative p-2 rounded-lg hover:bg-surface text-fg-2 transition"
+              aria-label={
+                unreadCount > 0
+                  ? `Notifications, ${unreadCount} unread`
+                  : "Notifications"
+              }
+            >
+              <Bell className="w-5 h-5" />
+              {unreadCount > 0 && (
+                <span className="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-accent-rose text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-page">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {panelOpen && (
+              <div className="fixed right-2 left-2 top-16 z-50">
+                <NotificationPanel
+                  open={panelOpen}
+                  onClose={() => setPanelOpen(false)}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Profile dropdown */}
+          <div className="relative" ref={mobileDropdownRef}>
+            <button
+              onClick={() => setDropdownOpen((v) => !v)}
+              className="p-1 rounded-xl hover:bg-surface transition"
+              aria-label="Open profile menu"
+            >
+              <UserAvatar user={user} size="md" />
+            </button>
+
+            {dropdownOpen && (
+              <div
+                className="fixed right-3 top-15 z-50 w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl bg-card border border-line shadow-xl overflow-hidden"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <DropdownContent
+                  user={user}
+                  onClose={() => setDropdownOpen(false)}
+                  onLogout={handleLogout}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ================= MOBILE SEARCH ROW ================= */}
+      <div className="lg:hidden px-4 pb-3">
+        <GlobalSearch placeholder="Search meetings, notes, tasks..." />
+      </div>
     </header>
+  );
+}
+
+/* ============================================================
+   DROPDOWN CONTENT (shared between desktop + mobile)
+   ============================================================ */
+function DropdownContent({ user, onClose, onLogout }) {
+  return (
+    <>
+      <div className="px-4 py-3 border-b border-line flex items-center gap-3">
+        <UserAvatar user={user} size="lg" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-fg truncate">
+            {user?.fullName || user?.name || "User"}
+          </p>
+          <p className="text-xs text-fg-3 truncate">
+            {user?.email || "user@example.com"}
+          </p>
+        </div>
+      </div>
+
+      <div className="py-1">
+        <MenuItem to="/settings" icon={UserIcon} onClick={onClose}>
+          Profile
+        </MenuItem>
+        <MenuItem to="/settings" icon={SettingsIcon} onClick={onClose}>
+          Settings
+        </MenuItem>
+        <MenuItem to="/help" icon={HelpCircle} onClick={onClose}>
+          Help & Support
+        </MenuItem>
+      </div>
+
+      <div className="border-t border-line">
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-accent-rose hover:bg-accent-rose/10 transition"
+        >
+          <LogOut className="w-4 h-4" />
+          Logout
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -209,9 +375,9 @@ function MenuItem({ to, icon: Icon, children, onClick }) {
     <Link
       to={to}
       onClick={onClick}
-      className="flex items-center gap-2.5 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
+      className="flex items-center gap-2.5 px-4 py-2 text-sm text-fg-2 hover:bg-surface"
     >
-      <Icon className="w-4 h-4 text-slate-400" />
+      <Icon className="w-4 h-4 text-fg-3" />
       {children}
     </Link>
   );

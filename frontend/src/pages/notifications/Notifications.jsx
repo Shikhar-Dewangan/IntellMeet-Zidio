@@ -1,40 +1,110 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import toast from "react-hot-toast";
-import { Bell, CheckCheck, Trash2 } from "lucide-react";
+import { Bell, CheckCheck } from "lucide-react";
 import {
   getMyNotifications,
+  getUnreadNotificationCount,
   markAllNotificationsAsRead,
   markNotificationAsRead,
   deleteNotification,
 } from "../../services/notification.service.js";
-import { getApiError, unwrapApiList } from "../../utils/apiData.js";
+import {
+  getApiError,
+  unwrapApiData,
+  unwrapApiList,
+} from "../../utils/apiData.js";
 import {
   EmptyState,
   LoadingState,
-  PageHeader,
   SectionCard,
+  Tabs,
 } from "../../components/ui/Shared.jsx";
+import NotificationItem from "../../components/notification/NotificationItem.jsx";
+
+const TASK_TYPES = ["task_assigned", "task_reassigned", "task_updated", "task_completed"];
+const INVITATION_TYPES = [
+  "meeting_invitation",
+  "meeting_invitation_accepted",
+  "meeting_invitation_rejected",
+  "meeting_updated",
+  "project_invitation",
+];
+const PROJECT_TYPES = [
+  "project_updated",
+  "project_member_added",
+  "project_member_removed",
+];
 
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+
+  const loadNotifications = useCallback(async () => {
+    try {
+      const [response, unreadResponse] = await Promise.all([
+        getMyNotifications({ limit: 100, page: 1 }),
+        getUnreadNotificationCount(),
+      ]);
+      setNotifications(unwrapApiList(response));
+      setUnreadCount(unwrapApiData(unreadResponse)?.count ?? 0);
+    } catch (error) {
+      toast.error(getApiError(error, "Could not load notifications"));
+      setNotifications([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    getMyNotifications()
-      .then((response) => setNotifications(unwrapApiList(response)))
-      .catch((error) => {
-        toast.error(getApiError(error, "Could not load notifications"));
-        setNotifications([]);
-      })
-      .finally(() => setLoading(false));
+    loadNotifications();
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    window.addEventListener("notifications:updated", loadNotifications);
+    return () => window.removeEventListener("notifications:updated", loadNotifications);
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    const handleNew = (event) => {
+      const notification = event.detail;
+      if (!notification?._id) return;
+      setNotifications((items) => {
+        if (items.some((item) => item._id === notification._id)) return items;
+        return [notification, ...items].slice(0, 100);
+      });
+    };
+    window.addEventListener("notifications:new", handleNew);
+    return () => window.removeEventListener("notifications:new", handleNew);
   }, []);
+
+  const filtered = useMemo(() => {
+    if (filter === "unread") return notifications.filter((item) => !item.isRead);
+    if (filter === "invitations") return notifications.filter((item) => INVITATION_TYPES.includes(item.type));
+    if (filter === "tasks") return notifications.filter((item) => TASK_TYPES.includes(item.type));
+    if (filter === "projects") return notifications.filter((item) => PROJECT_TYPES.includes(item.type));
+    if (filter === "teams") {
+      return notifications.filter((item) => [
+        "team_member_added",
+        "team_member_removed",
+        "project_owner_granted",
+        "project_owner_revoked",
+      ].includes(item.type));
+    }
+    return notifications;
+  }, [notifications, filter]);
 
   const markAll = async () => {
     try {
       await markAllNotificationsAsRead();
-      setNotifications((items) =>
-        items.map((item) => ({ ...item, isRead: true })),
-      );
+      const now = new Date().toISOString();
+      setNotifications((items) => items.map((item) => ({
+        ...item,
+        isRead: true,
+        readAt: item.readAt || now,
+      })));
+      setUnreadCount(0);
       window.dispatchEvent(new Event("notifications:updated"));
       toast.success("Notifications marked as read");
     } catch (error) {
@@ -45,11 +115,11 @@ export default function Notifications() {
   const markRead = async (id) => {
     try {
       await markNotificationAsRead(id);
-      setNotifications((items) =>
-        items.map((item) =>
-          item._id === id ? { ...item, isRead: true } : item,
-        ),
-      );
+      const wasUnread = notifications.some((item) => item._id === id && !item.isRead);
+      setNotifications((items) => items.map((item) => item._id === id
+        ? { ...item, isRead: true, readAt: new Date().toISOString() }
+        : item));
+      if (wasUnread) setUnreadCount((count) => Math.max(0, count - 1));
       window.dispatchEvent(new Event("notifications:updated"));
     } catch (error) {
       toast.error(getApiError(error, "Could not update notification"));
@@ -59,9 +129,10 @@ export default function Notifications() {
   const remove = async (id) => {
     try {
       await deleteNotification(id);
+      const wasUnread = notifications.some((item) => item._id === id && !item.isRead);
       setNotifications((items) => items.filter((item) => item._id !== id));
+      if (wasUnread) setUnreadCount((count) => Math.max(0, count - 1));
       window.dispatchEvent(new Event("notifications:updated"));
-      toast.success("Notification deleted");
     } catch (error) {
       toast.error(getApiError(error, "Could not delete notification"));
     }
@@ -69,85 +140,74 @@ export default function Notifications() {
 
   if (loading) return <LoadingState text="Loading notifications..." />;
 
-  const unread = notifications.filter((item) => !item.isRead).length;
-
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Notifications"
-        subtitle={
-          unread ? `${unread} unread notifications.` : "You are all caught up."
-        }
-        action={
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-fg sm:text-3xl">Notifications</h1>
+          <p className="mt-1 text-sm text-fg-2">
+            {unreadCount > 0
+              ? `You have ${unreadCount} unread notification${unreadCount !== 1 ? "s" : ""}.`
+              : "You are all caught up."}
+          </p>
+        </div>
+        {unreadCount > 0 && (
           <button
             type="button"
             onClick={markAll}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50    "
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-line bg-card px-4 py-2.5 text-sm font-semibold text-fg transition hover:bg-surface"
           >
             <CheckCheck className="h-4 w-4" />
             Mark all as read
           </button>
-        }
+        )}
+      </div>
+
+      <Tabs
+        tabs={[
+          { value: "all", label: `All${notifications.length ? ` (${notifications.length})` : ""}` },
+          { value: "unread", label: `Unread${unreadCount ? ` (${unreadCount})` : ""}` },
+          { value: "invitations", label: "Invitations" },
+          { value: "projects", label: "Projects" },
+          { value: "tasks", label: "Tasks" },
+          { value: "teams", label: "Teams & permissions" },
+        ]}
+        active={filter}
+        onChange={setFilter}
       />
 
-      {notifications.length ? (
-        <SectionCard>
-          <ul className="divide-y divide-slate-100 ">
-            {notifications.map((item) => (
-              <li
-                key={item._id}
-                className={`flex gap-3 p-4 sm:p-5 ${item.isRead ? "bg-transparent" : "bg-blue-50/50 "}`}
-              >
-                <div className="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-600  ">
-                  <Bell className="h-4 w-4" />
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <button
-                    type="button"
-                    onClick={() => markRead(item._id)}
-                    className="block w-full text-left"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-slate-900 ">
-                        {item.title || item.type || "Notification"}
-                      </p>
-                      {!item.isRead && (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-700  ">
-                          New
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-1 text-sm text-slate-600 ">
-                      {item.message || "Workspace activity."}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500 ">
-                      {item.createdAt
-                        ? new Date(item.createdAt).toLocaleString()
-                        : "Just now"}
-                    </p>
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => remove(item._id)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-700 transition hover:bg-red-100   "
-                  aria-label="Delete notification"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-      ) : (
+      {filtered.length === 0 ? (
         <SectionCard>
           <EmptyState
             icon={Bell}
-            title="No notifications"
+            title={
+              filter === "unread"
+                ? "No unread notifications"
+                : filter === "invitations"
+                ? "No invitations"
+                : filter === "tasks"
+                ? "No task notifications"
+                : filter === "projects"
+                ? "No project notifications"
+                : filter === "teams"
+                ? "No team or permission notifications"
+                : "No notifications"
+            }
             description="Activity and updates will appear here."
           />
+        </SectionCard>
+      ) : (
+        <SectionCard>
+          <div className="divide-y divide-line">
+            {filtered.map((notification) => (
+              <NotificationItem
+                key={notification._id}
+                notification={notification}
+                onMarkRead={markRead}
+                onDelete={remove}
+              />
+            ))}
+          </div>
         </SectionCard>
       )}
     </div>

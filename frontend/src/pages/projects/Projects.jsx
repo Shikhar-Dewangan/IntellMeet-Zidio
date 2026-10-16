@@ -1,37 +1,62 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+// frontend/src/pages/Projects.jsx
+import { useEffect, useMemo, useState } from "react";
+import { useSelector } from "react-redux";
 import toast from "react-hot-toast";
-import { FolderKanban, Plus, Search, Trash2 } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import {
-  createProject,
   deleteProject,
   getProjects,
 } from "../../services/project.service.js";
-import { getApiError, unwrapApiList } from "../../utils/apiData.js";
+import { getMyTeams } from "../../services/team.service.js";
 import {
-  EmptyState,
-  FilterBar,
-  LoadingState,
-  PageHeader,
-  PriorityBadge,
-  SectionCard,
-  StatusBadge,
-} from "../../components/ui/Shared.jsx";
+  getApiError,
+  unwrapApiList,
+} from "../../utils/apiData.js";
+import { LoadingState, EmptyState } from "../../components/ui/Shared.jsx";
+import ProjectCard from "../../components/project/ProjectCard.jsx";
+import ProjectSidebar from "../../components/project/ProjectSidebar.jsx";
+import CreateProjectModal from "../../components/project/CreateProjectModal.jsx";
+import ProjectTabs from "../../components/project/ProjectTabs.jsx";
+import ProjectFilters from "../../components/project/ProjectFilters.jsx";
 
 export default function Projects() {
-  const [projects, setProjects] = useState([]);
-  const [form, setForm] = useState({
-    name: "",
-    description: "",
-    priority: "medium",
-  });
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  const currentUser = useSelector((s) => s.auth.user);
+  const currentUserId = currentUser?._id;
+  const isAdmin = currentUser?.role === "admin";
 
-  const loadProjects = async () => {
+  const [projects, setProjects] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("all");
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState("grid");
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Filters
+  const [teamFilter, setTeamFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const [favorites, setFavorites] = useState(() => {
     try {
-      const response = await getProjects();
-      setProjects(unwrapApiList(response));
+      return JSON.parse(
+        localStorage.getItem("project_favorites") || "[]"
+      );
+    } catch {
+      return [];
+    }
+  });
+
+  const loadData = async () => {
+    try {
+      const [projectRes, teamRes] = await Promise.all([
+        getProjects(),
+        getMyTeams().catch(() => ({ data: [] })),
+      ]);
+      setProjects(unwrapApiList(projectRes));
+      setTeams(unwrapApiList(teamRes));
     } catch (error) {
       toast.error(getApiError(error, "Could not load projects"));
       setProjects([]);
@@ -41,151 +66,282 @@ export default function Projects() {
   };
 
   useEffect(() => {
-    loadProjects();
+    loadData();
   }, []);
 
-  const create = async (event) => {
-    event.preventDefault();
-    try {
-      await createProject(form);
-      setForm({ name: "", description: "", priority: "medium" });
-      toast.success("Project created");
-      await loadProjects();
-    } catch (error) {
-      toast.error(getApiError(error, "Could not create project"));
-    }
+  const toggleFavorite = (id) => {
+    setFavorites((prev) => {
+      const next = prev.includes(id)
+        ? prev.filter((f) => f !== id)
+        : [...prev, id];
+      localStorage.setItem("project_favorites", JSON.stringify(next));
+      return next;
+    });
   };
 
-  const remove = async (id) => {
+  const handleDelete = async (id) => {
+    if (
+      !window.confirm("Delete this project? This cannot be undone.")
+    )
+      return;
     try {
       await deleteProject(id);
-      setProjects((items) => items.filter((item) => item._id !== id));
+      setProjects((items) => items.filter((p) => p._id !== id));
       toast.success("Project deleted");
+      setMenuOpenId(null);
     } catch (error) {
       toast.error(getApiError(error, "Could not delete project"));
     }
   };
 
-  const visibleProjects = projects.filter((project) => {
-    const query = search.trim().toLowerCase();
-    if (!query) return true;
-    return (
-      project.name?.toLowerCase().includes(query) ||
-      project.description?.toLowerCase().includes(query)
-    );
-  });
+  const handleClearFilters = () => {
+    setTeamFilter("all");
+    setStatusFilter("all");
+    setPriorityFilter("all");
+  };
+
+  const hasActiveFilters =
+    teamFilter !== "all" ||
+    statusFilter !== "all" ||
+    priorityFilter !== "all";
+
+  /* ============ FILTERS ============ */
+  const visibleProjects = useMemo(() => {
+    let list = [...projects];
+
+    // Tabs
+    if (activeTab === "mine") {
+      list = list.filter(
+        (p) => (p.owner?._id || p.owner) === currentUserId
+      );
+    } else if (activeTab === "recent") {
+      list = list
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt || 0).getTime() -
+            new Date(a.updatedAt || 0).getTime()
+        )
+        .slice(0, 6);
+    } else if (activeTab === "archived") {
+      list = list.filter((p) => p.status === "archived");
+    }
+
+    // Search
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (p) =>
+          p.name?.toLowerCase().includes(q) ||
+          p.description?.toLowerCase().includes(q)
+      );
+    }
+
+    // Filters
+    if (teamFilter !== "all") {
+      list = list.filter((p) =>
+        (p.teams || []).some(
+          (t) => (t._id || t).toString() === teamFilter
+        )
+      );
+    }
+    if (statusFilter !== "all") {
+      list = list.filter((p) => p.status === statusFilter);
+    }
+    if (priorityFilter !== "all") {
+      list = list.filter((p) => p.priority === priorityFilter);
+    }
+
+    return list;
+  }, [
+    projects,
+    activeTab,
+    search,
+    teamFilter,
+    statusFilter,
+    priorityFilter,
+    currentUserId,
+  ]);
+
+  const tabs = useMemo(
+    () => [
+      { value: "all", label: "All Projects", count: projects.length },
+      {
+        value: "mine",
+        label: "My Projects",
+        count: projects.filter(
+          (p) => (p.owner?._id || p.owner) === currentUserId
+        ).length,
+      },
+      {
+        value: "recent",
+        label: "Recent",
+        count: Math.min(6, projects.length),
+      },
+      {
+        value: "archived",
+        label: "Archived",
+        count: projects.filter((p) => p.status === "archived").length,
+      },
+    ],
+    [projects, currentUserId]
+  );
 
   if (loading) return <LoadingState text="Loading projects..." />;
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Projects"
-        subtitle="Manage initiatives, priorities, and cross-functional work."
-      />
+      {/* ============ HEADER ============ */}
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-fg">
+            Projects
+          </h1>
+          <p className="mt-1 text-sm text-fg-2">
+            Plan, manage and track your team projects.
+          </p>
+        </div>
 
-      <SectionCard title="Create project" icon={FolderKanban}>
-        <form
-          onSubmit={create}
-          className="grid gap-4 p-5 lg:grid-cols-[1.2fr_1.2fr_0.7fr_auto]"
+        <button
+          onClick={() => setCreateOpen(true)}
+          className="inline-flex items-center gap-2 rounded-xl bg-accent-blue hover:bg-accent-blue/90 px-4 py-2.5 text-sm font-semibold text-white transition shadow-lg shadow-accent-blue/25 shrink-0"
         >
-          <input
-            required
-            placeholder="Project name"
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20   "
-          />
-          <input
-            placeholder="Description"
-            value={form.description}
-            onChange={(event) =>
-              setForm({ ...form, description: event.target.value })
-            }
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20   "
-          />
-          <select
-            value={form.priority}
-            onChange={(event) =>
-              setForm({ ...form, priority: event.target.value })
-            }
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20   "
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-          <button
-            type="submit"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4" />
-            Create
-          </button>
-        </form>
-      </SectionCard>
+          <Plus className="h-4 w-4" />
+          Create Project
+        </button>
+      </div>
 
-      <FilterBar>
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      {/* ============ TABS ============ */}
+      <ProjectTabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+
+      {/* ============ SEARCH + FILTER TOGGLE ============ */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 min-w-0">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-3" />
           <input
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search projects"
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 pl-9 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20   "
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search projects..."
+            className="w-full rounded-xl border border-line bg-card pl-9 pr-11 py-2.5 text-sm text-fg placeholder:text-fg-3 focus:border-accent-blue focus:outline-none focus:ring-2 focus:ring-accent-blue/20 transition"
           />
-        </div>
-      </FilterBar>
-
-      {visibleProjects.length ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visibleProjects.map((project) => (
-            <div
-              key={project._id}
-              className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:shadow-md  "
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            aria-label="Toggle filters"
+            className={`absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg transition ${
+              showFilters || hasActiveFilters
+                ? "bg-accent-blue/15 text-accent-blue"
+                : "text-fg-3 hover:bg-surface"
+            }`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="h-3.5 w-3.5"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-600  ">
-                  <FolderKanban className="h-5 w-5" />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => remove(project._id)}
-                  className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-600 transition hover:bg-red-100   "
-                  aria-label="Delete project"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="mt-4">
-                <Link
-                  to={`/projects/${project._id}`}
-                  className="block text-base font-semibold text-slate-900 transition hover:text-blue-600 "
-                >
-                  {project.name}
-                </Link>
-                <p className="mt-2 text-sm text-slate-500 ">
-                  {project.description || "No description"}
-                </p>
-              </div>
-
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <StatusBadge status={project.status || "active"} />
-                <PriorityBadge priority={project.priority || "medium"} />
-              </div>
-            </div>
-          ))}
+              <path d="M4 6h16M7 12h10M10 18h4" />
+            </svg>
+          </button>
         </div>
-      ) : (
-        <SectionCard>
-          <EmptyState
-            icon={FolderKanban}
-            title="No projects yet"
-            description="Create a project to start tracking work and milestones."
-          />
-        </SectionCard>
+      </div>
+
+      {/* ============ FILTERS ROW ============ */}
+      {showFilters && (
+        <ProjectFilters
+          teamFilter={teamFilter}
+          setTeamFilter={setTeamFilter}
+          teams={teams}
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          priorityFilter={priorityFilter}
+          setPriorityFilter={setPriorityFilter}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          onClear={handleClearFilters}
+          hasActiveFilters={hasActiveFilters}
+        />
       )}
+
+      {/* ============ MAIN GRID ============ */}
+      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+        {/* Left: Projects */}
+        <div className="min-w-0">
+          {visibleProjects.length === 0 ? (
+            <div className="rounded-2xl border border-line bg-card">
+              <EmptyState
+                icon={Plus}
+                title="No projects found"
+                description={
+                  search || hasActiveFilters
+                    ? "Try adjusting your search or filters."
+                    : "Create your first project to get started."
+                }
+                action={
+                  !search &&
+                  !hasActiveFilters && (
+                    <button
+                      onClick={() => setCreateOpen(true)}
+                      className="inline-flex items-center gap-2 rounded-xl bg-accent-blue hover:bg-accent-blue/90 px-4 py-2.5 text-sm font-semibold text-white transition"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Create Project
+                    </button>
+                  )
+                }
+              />
+            </div>
+          ) : viewMode === "grid" ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {visibleProjects.map((project) => (
+                <ProjectCard
+                  key={project._id}
+                  project={project}
+                  onDelete={handleDelete}
+                  onToggleFavorite={toggleFavorite}
+                  favorite={favorites.includes(project._id)}
+                  menuOpen={menuOpenId === project._id}
+                  setMenuOpen={setMenuOpenId}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-line bg-card overflow-hidden divide-y divide-line">
+              {visibleProjects.map((project) => (
+                <div
+                  key={project._id}
+                  className="flex items-center gap-4 p-4 hover:bg-surface/50 transition"
+                >
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-bold text-fg truncate">
+                      {project.name}
+                    </h3>
+                    <p className="text-xs text-fg-3 truncate">
+                      {project.description || "No description"}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-fg-2 shrink-0 capitalize">
+                    {project.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Right: Sidebar */}
+        <ProjectSidebar projects={projects} teams={teams} />
+      </div>
+
+      {/* ============ CREATE MODAL ============ */}
+      <CreateProjectModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(project) =>
+          setProjects((items) => [project, ...items])
+        }
+        currentUserId={currentUserId}
+        isAdmin={isAdmin}
+      />
     </div>
   );
 }

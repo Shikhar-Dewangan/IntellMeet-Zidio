@@ -22,9 +22,15 @@ const initSocketServer = (server) => {
     io.use(async (socket, next) => {
         try {
             const authHeader = socket.handshake.headers.authorization || socket.handshake.auth?.token;
+            const cookieHeader = socket.handshake.headers.cookie || "";
+            const accessTokenCookie = cookieHeader
+                .split(";")
+                .map((cookie) => cookie.trim())
+                .find((cookie) => cookie.startsWith("accessToken="))
+                ?.slice("accessToken=".length);
             const token = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
                 ? authHeader.replace("Bearer ", "")
-                : authHeader;
+                : authHeader || (accessTokenCookie && decodeURIComponent(accessTokenCookie));
 
             if (!token) {
                 return next(new Error("Authentication required"));

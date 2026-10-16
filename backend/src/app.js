@@ -7,6 +7,7 @@ import registerRoutes from "./routes/index.js";
 import errorMiddleware from "./middleware/error.middleware.js";
 import notFoundMiddleware from "./middleware/notFound.middleware.js";
 
+
 dotenv.config({ path: "./.env" });
 
 const app = express();

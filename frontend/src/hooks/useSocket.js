@@ -10,10 +10,19 @@ export default function useSocket({ token, enabled = true } = {}) {
   useEffect(() => {
     if (!enabled || !socketUrl) return undefined;
 
+    // ✅ Singleton — reuse connection if already open
+    if (socketRef.current?.connected) return undefined;
+
     const socket = io(socketUrl, {
       withCredentials: true,
-      ...(token ? { auth: { token } } : {}),
+      transports: ["websocket"], // ✅ Skip polling for lower latency
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
+
     socketRef.current = socket;
 
     return () => {

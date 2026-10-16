@@ -1,3 +1,4 @@
+// backend/models/task.model.js
 import mongoose from "mongoose";
 
 const taskSchema = new mongoose.Schema(
@@ -63,6 +64,54 @@ const taskSchema = new mongoose.Schema(
             ref: "ActionItem",
             default: null,
         },
+
+        /**
+         * Task attachments (Cloudinary-backed).
+         * Empty array for legacy tasks (backward-compatible).
+         */
+        attachments: [
+            {
+                name: {
+                    type: String,
+                    required: true,
+                    trim: true,
+                    maxlength: 255,
+                },
+                url: {
+                    type: String,
+                    required: true,
+                    trim: true,
+                },
+                publicId: {
+                    type: String,
+                    required: true,
+                    trim: true,
+                },
+                resourceType: {
+                    type: String,
+                    trim: true,
+                    default: "raw",
+                },
+                mimeType: {
+                    type: String,
+                    trim: true,
+                    default: "",
+                },
+                size: {
+                    type: Number,
+                    default: 0,
+                },
+                uploadedBy: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: "User",
+                    required: true,
+                },
+                uploadedAt: {
+                    type: Date,
+                    default: Date.now,
+                },
+            },
+        ],
     },
     {
         timestamps: true,
@@ -75,17 +124,20 @@ taskSchema.pre("save", function (next) {
     } else {
         this.completedAt = null;
     }
-
-    next();
+    next;
 });
 
 taskSchema.index({ project: 1, status: 1 });
+taskSchema.index({ team: 1, status: 1 });
 taskSchema.index({ assignee: 1 });
 taskSchema.index({ createdBy: 1 });
 taskSchema.index({ dueDate: 1 });
 taskSchema.index(
     { actionItem: 1 },
-    { unique: true, partialFilterExpression: { actionItem: { $type: "objectId" } } }
+    {
+        unique: true,
+        partialFilterExpression: { actionItem: { $type: "objectId" } },
+    }
 );
 
 const Task = mongoose.model("Task", taskSchema);

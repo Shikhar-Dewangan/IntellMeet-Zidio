@@ -39,6 +39,19 @@ const userSchema = new mongoose.Schema(
       default: "",
     },
 
+    appearance: {
+      accent: {
+        type: String,
+        enum: ["indigo", "violet", "pink", "red", "orange", "green", "blue"],
+        default: "indigo",
+      },
+      fontSize: {
+        type: String,
+        enum: ["small", "medium", "large"],
+        default: "medium",
+      },
+    },
+
     role: {
       type: String,
       enum: ["admin", "member"],

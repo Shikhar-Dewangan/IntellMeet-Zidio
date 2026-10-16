@@ -5,13 +5,15 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "jest --runInBand"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@deepgram/sdk": "^5.0.0",
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.11.0",
     "cookie-parser": "^1.4.7",
@@ -20,6 +22,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "google-auth-library": "^11.1.0",
+    "groq-sdk": "^1.6.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.10.2",
@@ -30,6 +33,10 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "jest": "^30.5.2",
+    "mongodb-memory-server": "^11.3.0",
+    "nodemon": "^1.14.10",
+    "prettier": "^3.9.9",
+    "supertest": "^7.3.1"
   }
 }

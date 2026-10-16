@@ -9,6 +9,10 @@ import actionItemRoutes from "./actionItem.routes.js";
 import notificationRoutes from "./notification.routes.js";
 import recordingRoutes from "./recording.routes.js";
 import analyticsRoutes from "./analytics.routes.js";
+import transcriptRoutes from "./transcript.routes.js";
+import aiInsightRoutes from "./aiInsight.routes.js";
+import liveTranscription from "./liveTranscription.routes.js";
+import searchRoutes from "./search.routes.js";
 
 const registerRoutes = (app) => {
     app.use("/api/v1/auth", authRoutes);
@@ -22,6 +26,10 @@ const registerRoutes = (app) => {
     app.use("/api/v1/notifications", notificationRoutes);
     app.use("/api/v1/recordings", recordingRoutes);
     app.use("/api/v1/analytics", analyticsRoutes);
+    app.use("/api/v1/transcripts", transcriptRoutes);
+    app.use("/api/v1/ai-insights", aiInsightRoutes);
+    app.use("/api/v1/live-transcription", liveTranscription);
+    app.use("/api/v1/search", searchRoutes);
 };
 
 export default registerRoutes;

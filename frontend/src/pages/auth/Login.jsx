@@ -63,10 +63,10 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-slate-50 via-blue-50/40 to-white flex items-start justify-center px-3 py-4 sm:p-6 lg:items-center lg:p-8">
-      <div className="w-full max-w-6xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl shadow-blue-900/5 border border-slate-200 overflow-hidden grid lg:grid-cols-2">
+    <div className="auth-page min-h-screen bg-linear-to-br from-slate-50 via-blue-50/40 to-white flex items-start justify-center px-3 py-4 sm:p-6 lg:items-center lg:p-8">
+      <div className="auth-card w-full max-w-6xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl shadow-blue-900/5 border border-slate-200 overflow-hidden grid lg:grid-cols-2">
         {/* ============ LEFT — Branding + Mockup ============ */}
-        <div className="hidden lg:flex flex-col p-10 xl:p-14 bg-linear-to-brrom-white via-blue-50/30 to-violet-50/30">
+        <div className="auth-brand-panel hidden lg:flex flex-col p-10 xl:p-14 bg-linear-to-br from-white via-blue-50/30 to-violet-50/30">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2.5 mb-12">
             <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/25">
@@ -180,11 +180,11 @@ export default function Login() {
           </Link>
 
           {/* Header */}
-          <div className="mb-7">
+          <div className="mb-7 text-center">
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
               Welcome back
             </h1>
-            <p className="mt-1.5 text-sm text-slate-500 flex items-center gap-2">
+            <p className="mt-1.5 text-sm text-slate-500 flex items-center justify-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
               Sign in to continue to your account
             </p>
@@ -195,6 +195,7 @@ export default function Login() {
             onSuccess={handleGoogleSuccess}
             onError={handleGoogleError}
             disabled={loading}
+            className="mx-auto w-full max-w-100"
           />
 
           {/* Divider */}

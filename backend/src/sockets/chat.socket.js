@@ -1,4 +1,5 @@
 import Meeting from "../models/meeting.model.js";
+import { touchMeetingActivity } from "../services/meeting.service.js";
 
 const getMeetingRoomName = (meetingId) => `meeting:${meetingId}`;
 
@@ -41,6 +42,8 @@ const registerChatSocketHandlers = (io) => {
                     timestamp: new Date().toISOString(),
                 };
 
+                await touchMeetingActivity(meetingId);
+                
                 io.to(getMeetingRoomName(meetingId)).emit("chat:message", payload);
 
                 if (typeof callback === "function") {

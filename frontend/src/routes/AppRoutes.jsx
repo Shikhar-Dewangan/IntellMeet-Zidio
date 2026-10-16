@@ -19,6 +19,9 @@ import Meetings from "../pages/meetings/Meetings.jsx";
 import Projects from "../pages/projects/Projects.jsx";
 import ProjectDetails from "../pages/projects/ProjectDetails.jsx";
 import Tasks from "../pages/tasks/Tasks.jsx";
+import CreateTask from "../pages/tasks/CreateTask.jsx";
+import TaskDetails from "../pages/tasks/TaskDetails.jsx";
+import AIInsights from "../pages/ai/AIInsights.jsx";
 import Teams from "../pages/teams/Teams.jsx";
 import TeamDetails from "../pages/teams/TeamDetails.jsx";
 import CreateMeeting from "../pages/meetings/CreateMeeting.jsx";
@@ -28,7 +31,6 @@ import Recordings from "../pages/recordings/Recordings.jsx";
 import RecordingDetails from "../pages/recordings/RecordingDetails.jsx";
 import Analytics from "../pages/analytics/Analytics.jsx";
 import Notifications from "../pages/notifications/Notifications.jsx";
-import Profile from "../pages/profile/Profile.jsx";
 import Settings from "../pages/settings/Settings.jsx";
 
 function AppRoutes() {
@@ -62,9 +64,9 @@ function AppRoutes() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--app-background)] text-[var(--app-muted)]">
-        <div className="flex items-center gap-3 rounded-full border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-2 shadow-sm">
-          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--app-accent)]" />
+      <div className="flex min-h-screen items-center justify-center bg-(--app-background) text-(--app-muted)">
+        <div className="flex items-center gap-3 rounded-full border border-(--app-border) bg-(--app-surface) px-4 py-2 shadow-sm">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-(--app-accent)" />
           Loading workspace...
         </div>
       </div>
@@ -106,10 +108,12 @@ function AppRoutes() {
           <Route path="/teams/:teamId" element={<TeamDetails />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId/*" element={<ProjectDetails />} />
+          <Route path="/ai-insights" element={<AIInsights />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/tasks/new" element={<CreateTask />} />
+          <Route path="/tasks/:taskId" element={<TaskDetails />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/notifications" element={<Notifications />} />
-          <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Route>

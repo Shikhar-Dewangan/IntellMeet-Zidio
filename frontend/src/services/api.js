@@ -10,6 +10,8 @@ const apiConfig = {
 
 const api = axios.create(apiConfig);
 const refreshClient = axios.create(apiConfig);
+
+// One refresh request at a time per browser tab.
 let refreshPromise = null;
 
 const isAuthRequest = (url = "") =>
@@ -25,12 +27,8 @@ const normalizeError = (error) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const request = error.config;
-    if (error.response?.status === 401 && request?._retry) {
-      store.dispatch(clearCredentials());
-      return Promise.reject(normalizeError(error));
-    }
 
     if (
       error.response?.status !== 401 ||
@@ -42,19 +40,23 @@ api.interceptors.response.use(
     }
 
     request._retry = true;
+
     if (!refreshPromise) {
-      refreshPromise = refreshClient.post("/auth/refresh-token").finally(() => {
-        refreshPromise = null;
-      });
+      refreshPromise = refreshClient
+        .post("/auth/refresh-token")
+        .finally(() => {
+          refreshPromise = null;
+        });
     }
 
-    return refreshPromise.then(
-      () => api(request),
-      (refreshError) => {
-        store.dispatch(clearCredentials());
-        return Promise.reject(normalizeError(refreshError));
-      },
-    );
+    try {
+      await refreshPromise;
+      // The browser applies the updated HttpOnly cookies automatically.
+      return api(request);
+    } catch (refreshError) {
+      store.dispatch(clearCredentials());
+      return Promise.reject(normalizeError(refreshError));
+    }
   },
 );
 

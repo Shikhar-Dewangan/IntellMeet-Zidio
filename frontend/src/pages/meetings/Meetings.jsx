@@ -1,7 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useSelector } from "react-redux";   // ← ADD
 import toast from "react-hot-toast";
-import { Calendar, Filter, Plus, Search, Video } from "lucide-react";
+import {
+  Calendar,
+  Filter,
+  Plus,
+  Search,
+  Video,
+  Zap,
+  CheckCircle2,
+  Hash,
+} from "lucide-react";
+
 import {
   deleteMeeting,
   endMeeting,
@@ -9,18 +20,29 @@ import {
   startMeeting,
 } from "../../services/meeting.service.js";
 import { getApiError, unwrapApiList } from "../../utils/apiData.js";
+
 import {
-  AvatarGroup,
   EmptyState,
   FilterBar,
   LoadingState,
-  PageHeader,
   SectionCard,
-  StatusBadge,
   Tabs,
 } from "../../components/ui/Shared.jsx";
 
+import OverviewHero from "../../components/ui/OverviewHeroCard.jsx";
+import StatCard from "../../components/ui/StatCard.jsx";
+import MeetingCard from "../../components/meeting/MeetingCard.jsx";
+
+// ← ADD helper
+const getUserId = (u) => {
+  if (!u) return null;
+  if (typeof u === "string") return u;
+  return u._id || u.id || null;
+};
+
 export default function Meetings() {
+  const navigate = useNavigate();
+  const currentUserId = useSelector((s) => getUserId(s.auth.user)); // ← ADD
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -42,27 +64,13 @@ export default function Meetings() {
     loadMeetings();
   }, []);
 
-  const tabs = [
-    { value: "all", label: "All" },
-    { value: "upcoming", label: "Upcoming" },
-    { value: "live", label: "Live" },
-    { value: "completed", label: "Completed" },
-  ];
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadMeetings();
+    }, 30000);
 
-  const visibleMeetings = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return meetings.filter((meeting) => {
-      const matchesTab =
-        statusFilter === "all" || meeting.status === statusFilter;
-      const matchesSearch =
-        !query ||
-        meeting.title?.toLowerCase().includes(query) ||
-        meeting.description?.toLowerCase().includes(query);
-
-      return matchesTab && matchesSearch;
-    });
-  }, [meetings, search, statusFilter]);
+    return () => clearInterval(interval);
+  }, []);
 
   const actOnMeeting = async (operation, id, message) => {
     try {
@@ -74,158 +82,153 @@ export default function Meetings() {
     }
   };
 
+  const handleJoin = (meeting) => {
+    navigate(`/meetings/${meeting._id}/room`);
+  };
+
+  const handleCopyLink = (meeting) => {
+    const link = `${window.location.origin}/meetings/${meeting._id}/room`;
+    navigator.clipboard?.writeText(link);
+    toast.success("Meeting link copied");
+  };
+
+  // ← ADD
+  const handleDelete = (meeting) => {
+    if (
+      !window.confirm(
+        `Delete "${meeting.title}"? This action cannot be undone.`,
+      )
+    )
+      return;
+    actOnMeeting(deleteMeeting, meeting._id, "Meeting deleted");
+  };
+
+  const stats = useMemo(() => {
+    const now = Date.now();
+    return {
+      total: meetings.length,
+      upcoming: meetings.filter(
+        (m) =>
+          (m.status === "scheduled" || m.status === "upcoming") &&
+          (!m.scheduledAt || new Date(m.scheduledAt).getTime() >= now),
+      ).length,
+      live: meetings.filter((m) => m.status === "live").length,
+      completed: meetings.filter((m) => m.status === "completed").length,
+    };
+  }, [meetings]);
+
+  const visibleMeetings = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return meetings
+      .filter((m) => {
+        const matchesTab =
+          statusFilter === "all" || m.status === statusFilter;
+        const matchesSearch =
+          !query ||
+          m.title?.toLowerCase().includes(query) ||
+          m.description?.toLowerCase().includes(query);
+        return matchesTab && matchesSearch;
+      })
+      .sort((a, b) => {
+        const aT = a.scheduledAt
+          ? new Date(a.scheduledAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        const bT = b.scheduledAt
+          ? new Date(b.scheduledAt).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        return bT - aT;
+      });
+  }, [meetings, search, statusFilter]);
+
+  const tabs = [
+    { value: "all", label: `All (${stats.total})` },
+    { value: "scheduled", label: `Upcoming (${stats.upcoming})` },
+    { value: "live", label: `Live (${stats.live})` },
+    { value: "completed", label: `Completed (${stats.completed})` },
+  ];
+
   if (loading) return <LoadingState text="Loading meetings..." />;
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="Meetings"
-        subtitle="Create, manage, and join your meetings."
-        action={
-          <Link
-            to="/meetings/create"
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 sm:w-auto"
-          >
-            <Plus className="h-4 w-4" />
-            New meeting
-          </Link>
-        }
+      <OverviewHero
+        badge="Meetings"
+        title="Plan conversations. Turn them into progress."
+        description="Schedule meetings, invite teammates, collaborate in real-time and get AI-powered insights after every meeting."
+        primaryAction={{
+          label: "Create Meeting",
+          to: "/meetings/create",
+          icon: Plus,
+        }}
+        secondaryAction={{
+          label: "Join with Code",
+          to: "/meetings/join",
+          icon: Hash,
+        }}
       />
 
-      <FilterBar>
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search meetings"
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 pl-9 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20   "
-          />
-        </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          label="Total Meetings"
+          value={stats.total}
+          icon={Video}
+          iconBg="bg-blue-100 dark:bg-blue-500/15"
+          iconColor="text-blue-600 dark:text-blue-400"
+        />
+        <StatCard
+          label="Upcoming"
+          value={stats.upcoming}
+          icon={Calendar}
+          iconBg="bg-violet-100 dark:bg-violet-500/15"
+          iconColor="text-violet-600 dark:text-violet-400"
+        />
+        <StatCard
+          label="Live Now"
+          value={stats.live}
+          icon={Zap}
+          iconBg="bg-emerald-100 dark:bg-emerald-500/15"
+          iconColor="text-emerald-600 dark:text-emerald-400"
+        />
+        <StatCard
+          label="Completed"
+          value={stats.completed}
+          icon={CheckCircle2}
+          iconBg="bg-amber-100 dark:bg-amber-500/15"
+          iconColor="text-amber-600 dark:text-amber-400"
+        />
+      </div>
 
-        <div className="relative w-full sm:w-auto">
-          <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 pl-9 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20    sm:w-40"
-          >
-            <option value="all">All status</option>
-            <option value="upcoming">Upcoming</option>
-            <option value="live">Live</option>
-            <option value="completed">Completed</option>
-          </select>
-        </div>
-      </FilterBar>
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+        <Tabs tabs={tabs} active={statusFilter} onChange={setStatusFilter} />
 
-      <Tabs tabs={tabs} active={statusFilter} onChange={setStatusFilter} />
-
-      {visibleMeetings.length ? (
-        <SectionCard>
-          <div className="divide-y divide-slate-100 ">
-            {visibleMeetings.map((meeting) => (
-              <div
-                key={meeting._id}
-                className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5"
-              >
-                <div className="flex items-center gap-3 sm:min-w-[160px]">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-100 text-blue-600  ">
-                    <Calendar className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-900 ">
-                      {meeting.title}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500 ">
-                      {meeting.duration || "Meeting"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-400">
-                      Scheduled
-                    </p>
-                    <p className="mt-1 text-sm text-slate-600 ">
-                      {meeting.scheduledAt
-                        ? new Date(meeting.scheduledAt).toLocaleString()
-                        : "No date set"}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <StatusBadge status={meeting.status || "upcoming"} />
-                    <AvatarGroup
-                      participants={meeting.participants || []}
-                      extra={0}
-                      size="sm"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                  <Link
-                    to={
-                      meeting.status === "live"
-                        ? `/meetings/${meeting._id}/room`
-                        : `/meetings/${meeting._id}`
-                    }
-                    className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-700"
-                  >
-                    {meeting.status === "live" ? "Join" : "View"}
-                  </Link>
-
-                  {meeting.status === "scheduled" && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        actOnMeeting(
-                          startMeeting,
-                          meeting._id,
-                          "Meeting started",
-                        )
-                      }
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50    "
-                    >
-                      Start
-                    </button>
-                  )}
-
-                  {meeting.status === "live" && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        actOnMeeting(endMeeting, meeting._id, "Meeting ended")
-                      }
-                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100   "
-                    >
-                      End
-                    </button>
-                  )}
-
-                  {meeting.status !== "live" &&
-                    meeting.status !== "completed" && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          actOnMeeting(
-                            deleteMeeting,
-                            meeting._id,
-                            "Meeting deleted",
-                          )
-                        }
-                        className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100   "
-                      >
-                        Delete
-                      </button>
-                    )}
-                </div>
-              </div>
-            ))}
+        <FilterBar>
+          <div className="relative w-full lg:w-64">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search meetings"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 pl-9 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+            />
           </div>
-        </SectionCard>
-      ) : (
+          <div className="relative w-full sm:w-auto">
+            <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 pl-9 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 sm:w-40"
+            >
+              <option value="all">All status</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="live">Live</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </FilterBar>
+      </div>
+
+      {visibleMeetings.length === 0 ? (
         <SectionCard>
           <EmptyState
             icon={Video}
@@ -246,6 +249,25 @@ export default function Meetings() {
             }
           />
         </SectionCard>
+      ) : (
+        <div className="space-y-3">
+          {visibleMeetings.map((meeting) => (
+            <MeetingCard
+              key={meeting._id}
+              meeting={meeting}
+              currentUserId={currentUserId}
+              onJoin={handleJoin}
+              onCopyLink={handleCopyLink}
+              onStart={() =>
+                actOnMeeting(startMeeting, meeting._id, "Meeting started")
+              }
+              onEnd={() =>
+                actOnMeeting(endMeeting, meeting._id, "Meeting ended")
+              }
+              onDelete={() => handleDelete(meeting)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

@@ -10,6 +10,9 @@ import {
     joinMeeting,
     leaveMeeting,
     endMeeting,
+    inviteUsersToMeeting,
+    acceptMeetingInvitation,
+    rejectMeetingInvitation
 } from "../controllers/meeting.controller.js";
 
 import { verifyJWT } from "../middleware/auth.middleware.js";
@@ -25,6 +28,9 @@ router.get("/", getMyMeetings);
 router.get("/:meetingId", getMeetingById);
 router.patch("/:meetingId", updateMeeting);
 router.delete("/:meetingId", deleteMeeting);
+router.post("/:meetingId/invite", inviteUsersToMeeting);
+router.post("/:meetingId/invitation/accept", acceptMeetingInvitation);
+router.post("/:meetingId/Invitation/reject", rejectMeetingInvitation);
 
 // Meeting lifecycle
 router.post("/:meetingId/start", startMeeting);

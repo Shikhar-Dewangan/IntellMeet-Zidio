@@ -5,19 +5,12 @@ import {
   FileText,
   CheckSquare,
   Users,
-  Sparkles,
   MessageSquare,
   Monitor,
   Mic,
-  MicOff,
   VideoIcon,
   PhoneOff,
   MoreHorizontal,
-  Plus,
-  PlayCircle,
-  ClipboardList,
-  BarChart3,
-  Search,
 } from "lucide-react";
 
 /* ============ FEATURES (image ke according) ============ */
@@ -57,14 +50,14 @@ const features = [
 
 export default function Landing() {
   return (
-    <div className="min-h-screen bg-white text-slate-900 font-sans antialiased">
+    <div className="landing-page min-h-screen bg-page font-sans text-fg antialiased">
       <Navbar />
 
       <main>
         {/* ============ HERO ============ */}
         <section
           id="home"
-          className="relative overflow-hidden bg-linear-to-b from-slate-50 via-white to-white scroll-mt-20"
+          className="relative overflow-hidden bg-linear-to-b from-slate-50 via-white to-white dark:from-page dark:via-card dark:to-card scroll-mt-20"
         >
           {/* Subtle decorative blobs */}
           <div className="absolute top-20 -left-20 w-72 h-72 rounded-full bg-blue-100/50 blur-3xl pointer-events-none" />
