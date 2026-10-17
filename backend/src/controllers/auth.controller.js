@@ -8,13 +8,12 @@ import { verifyGoogleToken } from "../utils/googleAuth.js";
 
 dotenv.config({ path: "./.env" });
 
-const isProduction = process.env.NODE_ENV === "production";
-
 const baseCookieOptions = {
-  httpOnly: true,
-    sameSite: "none",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
+   httpOnly: true,
+  secure: true,        
+  sameSite: 'none',      
+  partitioned: true,     
+  path: '/'
 };
 
 const accessCookieOptions = {
@@ -31,11 +30,6 @@ const clearAuthCookies = (res) =>
   res
     .clearCookie("refreshToken", baseCookieOptions)
     .clearCookie("accessToken", baseCookieOptions);
-
-const setAuthCookies = (res, accessToken, refreshToken) =>
-  res
-    .cookie("accessToken", accessToken, accessCookieOptions)
-    .cookie("refreshToken", refreshToken, refreshCookieOptions);
 
 const generateAccessTokenAndRefreshToken = async (user) => {
   const accessToken = user.generateAccessToken();
