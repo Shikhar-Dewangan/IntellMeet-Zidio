@@ -3,40 +3,69 @@ import jwt from "jsonwebtoken";
 import ApiError from "../utils/ApiError.js";
 import User from "../models/user.model.js";
 
-const authenticate = async (req, allowMissingToken = false) => {
-    let decodedToken;
-    const token = req.cookies?.accessToken || req.header("Authorization")?.replace("Bearer ", "");
+const getAccessToken = (req) => {
+  const cookieToken = req.cookies?.accessToken;
+  if (typeof cookieToken === "string" && cookieToken.trim()) {
+    return cookieToken.trim();
+  }
 
-    if (!token && allowMissingToken && !req.cookies?.refreshToken) {
-        req.user = null;
-        return;
+  const authorization = req.get("authorization");
+  if (typeof authorization === "string") {
+    const match = authorization.match(/^Bearer\s+(.+)$/i);
+    if (match?.[1]) return match[1].trim();
+  }
+
+  return null;
+};
+
+const authenticate = async (req, { optional = false } = {}) => {
+  const token = getAccessToken(req);
+
+  // Optional auth allows genuinely anonymous requests. A supplied but invalid
+  // token is still rejected, rather than silently treated as anonymous.
+  if (!token && optional) {
+    req.user = null;
+    return;
+  }
+
+  if (!token) {
+    throw new ApiError(401, "Authentication required. Please log in.");
+  }
+
+  if (!process.env.ACCESS_TOKEN_SECRET) {
+    throw new ApiError(500, "Authentication server configuration is incomplete");
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, {
+      algorithms: ["HS256"],
+    });
+  } catch (error) {
+    if (error?.name === "TokenExpiredError") {
+      throw new ApiError(401, "Access token expired. Please refresh your session.");
     }
+    throw new ApiError(401, "Invalid access token. Please log in again.");
+  }
 
-    try {
-        if (!token) {
-            throw new ApiError(401, "unauthorized access, token not found");
-        }
-        decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+  if (!decoded?._id) {
+    throw new ApiError(401, "Invalid access token payload");
+  }
 
-    } catch (error) {
-        throw new ApiError(401, error?.message || "unauthorized access, invalid token");
-    }
+  const user = await User.findById(decoded._id).select("-password -refreshToken");
+  if (!user || !user.isActive || user.isBlocked) {
+    throw new ApiError(401, "User session is invalid or inactive");
+  }
 
-    const user = await User.findById(decodedToken?._id).select("-password -refreshToken");
-
-    if (!user || !user.isActive) {
-        throw new ApiError(401, "Invalid or inactive user session");
-    }
-
-    req.user = user;
+  req.user = user;
 };
 
 export const verifyJWT = asyncHandler(async (req, res, next) => {
-    await authenticate(req);
-    next();
+  await authenticate(req);
+  return next();
 });
 
 export const optionalJWT = asyncHandler(async (req, res, next) => {
-    await authenticate(req, true);
-    next();
+  await authenticate(req, { optional: true });
+  return next();
 });

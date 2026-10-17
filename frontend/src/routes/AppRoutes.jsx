@@ -37,30 +37,36 @@ function AppRoutes() {
   const dispatch = useDispatch();
   const { isAuthenticated, loading } = useSelector((state) => state.auth);
 
-  useEffect(() => {
-    let isMounted = true;
+ useEffect(() => {
+  let isMounted = true;
 
-    getCurrentUser()
-      .then((response) => {
-        const user =
-          response?.data?.data ??
-          response?.data?.user ??
-          response?.data ??
-          null;
-        if (isMounted && user) dispatch(setCredentials(user));
-        else if (isMounted) dispatch(clearCredentials());
-      })
-      .catch(() => {
-        if (isMounted) dispatch(clearCredentials());
-      })
-      .finally(() => {
-        if (isMounted) dispatch(setLoading(false));
-      });
+  getCurrentUser()
+    .then((response) => {
+      // Axios response ya already-unwrapped data, dono handle karo
+      const body = response?.data ?? response;
+      const payload = body?.data ?? body;
+      const user = payload?.user ?? payload;
 
-    return () => {
-      isMounted = false;
-    };
-  }, [dispatch]);
+      // Sirf asli user object accept karo (envelope ya null nahi)
+      const isValidUser =
+        user && typeof user === "object" && (user._id || user.id);
+
+      if (!isMounted) return;
+
+      if (isValidUser) dispatch(setCredentials(user));
+      else dispatch(clearCredentials());
+    })
+    .catch(() => {
+      if (isMounted) dispatch(clearCredentials());
+    })
+    .finally(() => {
+      if (isMounted) dispatch(setLoading(false));
+    });
+
+  return () => {
+    isMounted = false;
+  };
+}, [dispatch]);
 
   if (loading) {
     return (

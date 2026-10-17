@@ -153,14 +153,19 @@ export default function Header() {
   }, [socketRef]);
 
   const handleLogout = async () => {
+  
     try {
       await logoutUser();
-    } catch {
-      // ignore
+      toast.success("Logged out");
+    } catch (error) {
+
+      toast.error(error?.message || "Logged out locally; server logout could not be confirmed");
     } finally {
       dispatch(clearCredentials());
-      toast.success("Logged out");
-      navigate("/");
+      setDropdownOpen(false);
+      setPanelOpen(false);
+      setUnreadCount(0);
+      navigate("/", { replace: true });
     }
   };
 

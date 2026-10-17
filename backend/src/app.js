@@ -12,9 +12,9 @@ dotenv.config({ path: "./.env" });
 
 const app = express();
 
-const allowedOrigins = (process.env.CLIENT_URL)
+const allowedOrigins = (process.env.CLIENT_URL || "")
     .split(",")
-    .map((origin) => origin.trim())
+    .map((o) => o.trim().replace(/\/$/, ""))
     .filter(Boolean);
 
 app.use(helmet());
