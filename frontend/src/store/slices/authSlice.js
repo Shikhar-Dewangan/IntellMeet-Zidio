@@ -16,7 +16,7 @@ const authSlice = createSlice({
       const responseData = payload?.data?.data ?? payload?.data ?? payload;
       const user = responseData?.user ?? responseData;
 
-      if (!user) return;
+      if (!user || typeof user !== "object" || !(user._id || user.id)) return;
 
       state.user = user;
       state.isAuthenticated = true;

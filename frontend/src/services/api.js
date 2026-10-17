@@ -5,17 +5,21 @@ import { clearCredentials } from "../store/slices/authSlice.js";
 const apiConfig = {
   baseURL: import.meta.env.VITE_API_URL,
   withCredentials: true,
-  timeout: 10000,
+  timeout: 15000,
 };
 
 const api = axios.create(apiConfig);
 const refreshClient = axios.create(apiConfig);
 
-// One refresh request at a time per browser tab.
 let refreshPromise = null;
+let logoutInProgress = false;
+
+export const setLogoutInProgress = (value) => {
+  logoutInProgress = Boolean(value);
+};
 
 const isAuthRequest = (url = "") =>
-  /^\/?auth\/(login|register|google|forgot-password|reset-password|refresh-token)(\/|$)/.test(
+  /^\/?auth\/(login|register|google|logout|forgot-password|reset-password|refresh-token)(\/|$)/i.test(
     url,
   );
 
@@ -30,6 +34,11 @@ api.interceptors.response.use(
   async (error) => {
     const request = error.config;
 
+    // Never refresh or change auth state as a side effect of logout.
+    if (logoutInProgress) {
+      return Promise.reject(normalizeError(error));
+    }
+
     if (
       error.response?.status !== 401 ||
       !request ||
@@ -41,20 +50,27 @@ api.interceptors.response.use(
 
     request._retry = true;
 
-    if (!refreshPromise) {
-      refreshPromise = refreshClient
-        .post("/auth/refresh-token")
-        .finally(() => {
-          refreshPromise = null;
-        });
-    }
-
     try {
+      if (!refreshPromise) {
+        refreshPromise = refreshClient
+          .post("/auth/refresh-token")
+          .finally(() => {
+            refreshPromise = null;
+          });
+      }
+
       await refreshPromise;
-      // The browser applies the updated HttpOnly cookies automatically.
+
+      // If logout began while refresh was in flight, do not replay old requests.
+      if (logoutInProgress) {
+        return Promise.reject(new Error("Logout in progress"));
+      }
+
       return api(request);
     } catch (refreshError) {
-      store.dispatch(clearCredentials());
+      if (!logoutInProgress) {
+        store.dispatch(clearCredentials());
+      }
       return Promise.reject(normalizeError(refreshError));
     }
   },

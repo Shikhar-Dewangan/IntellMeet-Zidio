@@ -1,4 +1,4 @@
-import api from "./api.js";
+import api, { setLogoutInProgress } from "./api.js";
 
 export const registerUser = async (userData) => {
   const response = await api.post("/auth/register", userData);
@@ -11,8 +11,14 @@ export const loginUser = async (credentials) => {
 };
 
 export const logoutUser = async () => {
-  const response = await api.post("/auth/logout");
-  return response.data;
+  setLogoutInProgress(true);
+  try {
+    const response = await api.post("/auth/logout");
+    return response.data;
+  } finally {
+    // Header clears Redux state after this promise settles.
+    setLogoutInProgress(false);
+  }
 };
 
 export const refreshAccessToken = async () => {

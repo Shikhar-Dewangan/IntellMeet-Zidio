@@ -11,12 +11,12 @@ import {
     searchUsers,
 } from "../controllers/user.controller.js";
 
-import { optionalJWT, verifyJWT } from "../middleware/auth.middleware.js";
+import {  verifyJWT } from "../middleware/auth.middleware.js";
 import { uploadSingle } from "../middleware/multer.middleware.js";
 
 const router = Router();
 
-router.get("/me", optionalJWT, getCurrentUser);
+router.get("/me", verifyJWT, getCurrentUser);
 
 router.use(verifyJWT);
 
