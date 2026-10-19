@@ -113,6 +113,5 @@ Potential future improvements include:
 ## 👥 Contributors
 
 This project was developed as a collaborative project under the Zidio Development program.
-Project Contributors : Apoorva Kadiyala 
-                       Shikhar Dewangan
+Project Contributors : Apoorva Kadiyala & Shikhar Dewangan
                        
