@@ -4,12 +4,6 @@ IntellMeet is an AI-powered meeting and collaboration platform designed to make 
 
 The platform helps teams collaborate effectively, capture important meeting information, identify actionable tasks, and track progress.
 
-## 🚀 Live Demo
-
-**Live Application:**  (intell-meet-zidio-eight.vercel.app/)
-
-**GitHub Repository:** (https://github.com/Shikhar-Dewangan/IntellMeet-Zidio/)
-
 ## ✨ Key Features
 
 - **Real-Time Video Meetings:** Connect and collaborate through online video meetings.
