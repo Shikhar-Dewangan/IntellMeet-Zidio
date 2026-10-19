@@ -6,9 +6,9 @@ The platform helps teams collaborate effectively, capture important meeting info
 
 ## 🚀 Live Demo
 
-**Live Application:** [IntellMeet](https://intell-meet-zidio-eight.vercel.app/)
+**Live Application:**  (https://intell-meet-zidio-eight.vercel.app/)
 
-**GitHub Repository:** [IntellMeet-Zidio](https://github.com/Shikhar-Dewangan/IntellMeet-Zidio/)
+**GitHub Repository:** (https://github.com/Shikhar-Dewangan/IntellMeet-Zidio/)
 
 ## ✨ Key Features
 
