@@ -119,14 +119,26 @@ export default function Meetings() {
 
   const visibleMeetings = useMemo(() => {
     const query = search.trim().toLowerCase();
+    const now = Date.now();
+
+    // "Upcoming" tab ke liye stats wala hi logic
+    const isUpcoming = (m) =>
+      (m.status === "scheduled" || m.status === "upcoming") &&
+      (!m.scheduledAt || new Date(m.scheduledAt).getTime() >= now);
+
     return meetings
       .filter((m) => {
         const matchesTab =
-          statusFilter === "all" || m.status === statusFilter;
+          statusFilter === "all" ||
+          (statusFilter === "scheduled"
+            ? isUpcoming(m)
+            : m.status === statusFilter);
+
         const matchesSearch =
           !query ||
           m.title?.toLowerCase().includes(query) ||
           m.description?.toLowerCase().includes(query);
+
         return matchesTab && matchesSearch;
       })
       .sort((a, b) => {

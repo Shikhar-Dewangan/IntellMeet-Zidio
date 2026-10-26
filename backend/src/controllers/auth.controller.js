@@ -215,15 +215,23 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 
 // Logout. Route should be protected by verifyJWT.
 const logoutUser = asyncHandler(async (req, res) => {
-  if (!req.user?._id) {
-    throw new ApiError(401, "Authentication is required to log out");
-  }
+  const incomingRefreshToken = req.cookies?.refreshToken;
 
-  await User.findByIdAndUpdate(
-    req.user._id,
-    { $set: { refreshToken: null } },
-    { runValidators: false },
-  );
+  if (incomingRefreshToken && process.env.REFRESH_TOKEN_SECRET) {
+    try {
+      const decoded = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET, {
+        ignoreExpiration: true,
+      });
+      if (decoded?._id) {
+        await User.updateOne(
+          { _id: decoded._id, refreshToken: incomingRefreshToken },
+          { $set: { refreshToken: null } },
+        );
+      }
+    } catch {
+      // invalid token: cookies neeche clear ho jayengi
+    }
+  }
 
   clearAuthCookies(res);
   return res.status(200).json(new ApiResponse(200, null, "User logged out successfully"));

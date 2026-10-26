@@ -99,6 +99,13 @@ function formatDateTime(iso) {
   });
 }
 
+function toLocalInputValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 function getUserId(u) {
   if (!u) return null;
   if (typeof u === "string") return u;
@@ -249,9 +256,7 @@ export default function MeetingDetails() {
     setEditForm({
       title: meeting?.title || "",
       description: meeting?.description || "",
-      scheduledAt: meeting?.scheduledAt
-        ? new Date(meeting.scheduledAt).toISOString().slice(0, 16)
-        : "",
+      scheduledAt: toLocalInputValue(meeting?.scheduledAt),
     });
     setEditing(true);
   };
@@ -261,7 +266,14 @@ export default function MeetingDetails() {
   const save = async () => {
     setSaving(true);
     try {
-      const response = await updateMeeting(meetingId, editForm);
+      const payload = {
+        ...editForm,
+        scheduledAt: editForm.scheduledAt
+          ? new Date(editForm.scheduledAt).toISOString()
+          : undefined,
+      };
+
+      const response = await updateMeeting(meetingId, payload);
       setMeeting(unwrapApiData(response));
       setEditing(false);
       toast.success("Meeting updated");

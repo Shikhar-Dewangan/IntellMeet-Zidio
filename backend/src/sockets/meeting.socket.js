@@ -28,15 +28,22 @@ const verifyMeetingMembership = async (user, meetingId) => {
     throw new Error("Meeting not found");
   }
 
-  const isHost = meeting.host.toString() === user._id.toString();
+  const userId = user._id.toString();
+
+  const isHost = meeting.host.toString() === userId;
 
   const isParticipant = meeting.participants.some(
-    (memberId) => memberId.toString() === user._id.toString(),
+    (memberId) => memberId.toString() === userId,
+  );
+
+  // Invited (pending/accepted) users ko bhi allow karo, rejected ko nahi
+  const isInvited = meeting.invitedUsers?.some(
+    (inv) => inv.user?.toString() === userId && inv.status !== "rejected",
   );
 
   const isAdmin = user.role === "admin";
 
-  if (!isHost && !isParticipant && !isAdmin) {
+  if (!isHost && !isParticipant && !isInvited && !isAdmin) {
     throw new Error("You are not authorized to access this meeting");
   }
 
@@ -187,6 +194,17 @@ const registerMeetingSocketHandlers = (io) => {
           throw new Error("Meeting is not live");
         }
 
+         if (meeting.host.toString() !== socket.user._id.toString()) {
+          await Meeting.updateOne(
+            { _id: meetingId },
+            {
+              $addToSet: { participants: socket.user._id },
+              $set: { "invitedUsers.$[inv].status": "accepted" },
+            },
+            { arrayFilters: [{ "inv.user": socket.user._id }] },
+          );
+        }
+        
         const existingRoomSockets = await io.in(roomName).fetchSockets();
 
         const alreadyPresent = existingRoomSockets.some(
