@@ -1,36 +1,70 @@
 import { useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 
-export default function useSocket({ token, enabled = true } = {}) {
-  const socketRef = useRef(null);
-  const socketUrl =
-    import.meta.env.VITE_SOCKET_URL ||
-    import.meta.env.VITE_API_URL?.replace(/\/api\/v1\/?$/, "");
+let sharedSocket = null;
+let activeUsers = 0;
+let disconnectTimer = null;
 
-  useEffect(() => {
-    if (!enabled || !socketUrl) return undefined;
+const getSocketUrl = () =>
+  import.meta.env.VITE_SOCKET_URL ||
+  import.meta.env.VITE_API_URL?.replace(/\/api\/v1\/?$/, "");
 
-    // ✅ Singleton — reuse connection if already open
-    if (socketRef.current?.connected) return undefined;
+const getSharedSocket = () => {
+  const url = getSocketUrl();
+  if (!url) return null;
 
-    const socket = io(socketUrl, {
+  if (!sharedSocket) {
+    sharedSocket = io(url, {
       withCredentials: true,
-      transports: ["websocket"], // ✅ Skip polling for lower latency
+      transports: ["websocket"],
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 10000,
     });
 
-    socketRef.current = socket;
+    sharedSocket.on("connect", () =>
+      console.log("[socket] connected", sharedSocket.id),
+    );
+    sharedSocket.on("disconnect", (reason) =>
+      console.warn("[socket] disconnected:", reason),
+    );
+    sharedSocket.on("connect_error", (err) =>
+      console.warn("[socket] connect_error:", err.message),
+    );
+    sharedSocket.on("meeting:error", (e) =>
+      console.warn("[socket] meeting:error:", e?.message),
+    );
+  }
+  return sharedSocket;
+};
+
+export default function useSocket({ enabled = true } = {}) {
+  const socketRef = useRef(null);
+
+  // Render ke dauran hi set karo, taaki child effects ko null na mile
+  if (enabled && !socketRef.current) {
+    socketRef.current = getSharedSocket();
+  }
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    clearTimeout(disconnectTimer);
+    if (!socketRef.current) socketRef.current = getSharedSocket();
+    activeUsers += 1;
 
     return () => {
-      socket.removeAllListeners();
-      socket.disconnect();
-      socketRef.current = null;
+      activeUsers -= 1;
+      disconnectTimer = setTimeout(() => {
+        if (activeUsers === 0 && sharedSocket) {
+          sharedSocket.disconnect();
+          sharedSocket = null;
+        }
+      }, 1000);
     };
-  }, [enabled, socketUrl, token]);
+  }, [enabled]);
 
   return socketRef;
 }

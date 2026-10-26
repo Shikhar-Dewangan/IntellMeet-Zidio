@@ -13,10 +13,22 @@ const defaultConstraints = {
   },
 };
 
-const defaultIceServers = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
+const buildIceServers = () => {
+  const servers = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+
+  const turnUrl = import.meta.env.VITE_TURN_URL;
+  if (turnUrl) {
+    servers.push({
+      urls: turnUrl.split(",").map((u) => u.trim()),
+      username: import.meta.env.VITE_TURN_USERNAME,
+      credential: import.meta.env.VITE_TURN_CREDENTIAL,
+    });
+  }
+  return servers;
+};
 
 export default function useWebRTC({
   enabled = false,
@@ -25,7 +37,19 @@ export default function useWebRTC({
 } = {}) {
   const localStreamRef = useRef(null);
   const peerConnectionsRef = useRef(new Map());
+  const streamWaitersRef = useRef([]);
   const [error, setError] = useState(null);
+
+  const flushWaiters = (stream) => {
+    streamWaitersRef.current.forEach((resolve) => resolve(stream));
+    streamWaitersRef.current = [];
+  };
+
+  // Offer/answer banane se pehle ise await karo
+  const waitForLocalStream = useCallback(() => {
+    if (localStreamRef.current) return Promise.resolve(localStreamRef.current);
+    return new Promise((resolve) => streamWaitersRef.current.push(resolve));
+  }, []);
 
   useEffect(() => {
     if (!enabled || !navigator.mediaDevices?.getUserMedia) return undefined;
@@ -38,12 +62,17 @@ export default function useWebRTC({
         if (active) {
           localStreamRef.current = stream;
           onLocalStream?.(stream);
+          flushWaiters(stream);
         } else {
           stream.getTracks().forEach((track) => track.stop());
         }
       })
       .catch((mediaError) => {
-        if (active) setError(mediaError);
+        if (active) {
+          setError(mediaError);
+          // Camera/mic na mile tab bhi signaling aage badhe (receive-only)
+          flushWaiters(null);
+        }
       });
 
     return () => {
@@ -57,19 +86,25 @@ export default function useWebRTC({
   }, [constraints, enabled]);
 
   const createPeerConnection = useCallback((peerId, onIceCandidate, onTrack) => {
-    // Reuse existing
     if (peerConnectionsRef.current.has(peerId)) {
       return peerConnectionsRef.current.get(peerId);
     }
 
     const connection = new RTCPeerConnection({
-      iceServers: defaultIceServers,
-      iceCandidatePoolSize: 10, // ✅ Pre-gather ICE candidates
+      iceServers: buildIceServers(),
+      iceCandidatePoolSize: 10,
     });
 
-    localStreamRef.current?.getTracks().forEach((track) => {
-      connection.addTrack(track, localStreamRef.current);
-    });
+    const localStream = localStreamRef.current;
+    if (localStream) {
+      localStream.getTracks().forEach((track) => {
+        connection.addTrack(track, localStream);
+      });
+    } else {
+      // Local media nahi hai to bhi doosre ka video/audio receive ho sake
+      connection.addTransceiver("audio", { direction: "recvonly" });
+      connection.addTransceiver("video", { direction: "recvonly" });
+    }
 
     connection.onicecandidate = (event) => {
       if (event.candidate) onIceCandidate?.(peerId, event.candidate);
@@ -79,7 +114,7 @@ export default function useWebRTC({
 
     connection.onconnectionstatechange = () => {
       if (["failed", "closed", "disconnected"].includes(connection.connectionState)) {
-        try { connection.close(); } catch {}
+        try { connection.close(); } catch { /* ignore */ }
         peerConnectionsRef.current.delete(peerId);
       }
     };
@@ -90,11 +125,15 @@ export default function useWebRTC({
 
   const closePeerConnection = useCallback((peerId) => {
     const pc = peerConnectionsRef.current.get(peerId);
-    if (pc) {
-      try { pc.close(); } catch {}
+    if (pc) { 
+      try { pc.close(); } catch { /* ignore */ }
       peerConnectionsRef.current.delete(peerId);
     }
   }, []);
 
-  return { localStreamRef, error, createPeerConnection, closePeerConnection };
+  return {
+    waitForLocalStream,
+    createPeerConnection,
+    closePeerConnection,
+  };
 }
